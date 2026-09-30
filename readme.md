@@ -7,6 +7,7 @@ it once:
 
 ```toml
 [dependencies]
+bake = "0.17"
 bake-cargo = { version = "0.2" }
 ```
 
@@ -15,11 +16,10 @@ use bake_cargo as _;
 ```
 
 This crate links `bake-releases` and `bake-license`, so release-document tasks
-and `license:update` are also available without extra imports. It uses
-published registry versions of its dependencies, so each repository builds
-without sibling checkouts. The task executable also links Bake Agent Context.
-Run `cargo bake agent:context:install` to install context from dependencies
-such as `socketry-bake`; generated `.agents/context/` files are ignored by Git.
+and `license:update` are also available without extra imports. The task
+executable also links Bake Agent Context. Run
+`cargo bake agent:context:install` to install context from dependencies such as
+`bake`; generated `.agents/context/` files are ignored by Git.
 Shared Rust guidance lives in
 [Bake Agent Context](https://github.com/socketry/bake-agent-context-rust/blob/main/context/rust.md).
 This crate also publishes guidance in
@@ -31,7 +31,7 @@ your private `bake/` package, directly or through `socketry-project`, then run
 
 ```sh
 cargo bake cargo:packages
-cargo bake cargo:package socketry-bake
+cargo bake cargo:package bake
 ```
 
 Workspace discovery uses `cargo metadata --no-deps` and ignores packages marked
@@ -43,8 +43,8 @@ read from Cargo metadata.
 The `cargo:version:patch`, `cargo:version:minor`, and `cargo:version:major`
 tasks update the shared stable version of all publishable packages in the
 workspace. `cargo:version:bump --version X.Y.Z` sets an explicit higher version.
-These tasks preserve TOML
-formatting and update local path dependency requirements and `Cargo.lock`.
+These tasks preserve TOML formatting, update version requirements for
+in-workspace dependencies, and refresh `Cargo.lock`.
 After the update, they optionally call a project task named
 `cargo:after_version_bump`, passing the new version. If that task is absent,
 the version bump completes without a hook. A project can use the hook to run
@@ -139,9 +139,9 @@ After a package has been published once, crates.io allows its owners to register
 a GitHub Actions trusted publisher. Preview and apply the configuration with:
 
 ```sh
-cargo bake cargo:trusted-publishing:plan socketry-bake
+cargo bake cargo:trusted-publishing:plan bake
 export CARGO_REGISTRY_TOKEN=...
-cargo bake cargo:trusted-publishing:configure socketry-bake
+cargo bake cargo:trusted-publishing:configure bake
 ```
 
 The token must have the crates.io **Trusted Publishing** endpoint scope. For
@@ -161,7 +161,7 @@ trusted-publishing-only mode automatically. Once the GitHub workflow succeeds,
 you can enable that registry requirement:
 
 ```sh
-cargo bake cargo:trusted-publishing:require socketry-bake --required true
+cargo bake cargo:trusted-publishing:require bake --required true
 ```
 
 Keep that setting disabled until the configured workflow has successfully

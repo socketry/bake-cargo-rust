@@ -9,25 +9,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "bake-agent-context"
-version = "0.1.0"
+name = "bake"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "204eeb09dcabe7e7804453d0c8a867d413688d20c2ea972b63577fa74fc91cfb"
+checksum = "9eb0935384477dcff54df7fc3145427aaed736caa55eec674a89093096f40df7"
 dependencies = [
+ "bake-macros",
+ "linkme",
  "serde",
  "serde_json",
- "socketry-bake",
+]
+
+[[package]]
+name = "bake-agent-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "496c84a9890a2735a88a4e313461beccde1166aa2bd333bd5f4b6daf0c3972ac"
+dependencies = [
+ "bake",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "bake-cargo"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
+ "bake",
  "bake-license",
  "bake-releases",
  "serde",
  "serde_json",
- "socketry-bake",
  "tempfile",
  "toml_edit",
  "ureq",
@@ -37,28 +49,28 @@ dependencies = [
 name = "bake-cargo-project"
 version = "0.0.0"
 dependencies = [
+ "bake",
  "bake-agent-context",
  "bake-cargo",
  "bake-license",
  "bake-releases",
- "socketry-bake",
 ]
 
 [[package]]
 name = "bake-license"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "012e22660ec7c226ae9b9878eb952129237c043a25af13184ec96b52cc3a03e5"
+checksum = "11feb33128721729f6d5b4f89e7a01d2dc84b658a6232a550f4e10db4e2ab990"
 dependencies = [
- "socketry-bake",
+ "bake",
  "tempfile",
 ]
 
 [[package]]
 name = "bake-macros"
-version = "0.2.1"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b29c86d81ee8f4810e45f8ca9b23c7478bf724fe809cb304d7981bec923912e"
+checksum = "9d61e078d4ef38e2ba1f5218792234621fe10c75e175dd30ca82d7d91e7b91ef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -67,11 +79,11 @@ dependencies = [
 
 [[package]]
 name = "bake-releases"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc210a125812aee0f61afb99dc8579d6600537f5899d58fcfb269bbd88345dfa"
+checksum = "066f7e695fb0ce89445358a886ee2bf5eba7d10032f0ffb2527e774f6b567191"
 dependencies = [
- "socketry-bake",
+ "bake",
  "tempfile",
 ]
 
@@ -546,18 +558,6 @@ name = "smallvec"
 version = "1.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
-
-[[package]]
-name = "socketry-bake"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f78d5c5156533076cb33a2faffb5bc0a491bccec3835d9051d6b109c1ba0046"
-dependencies = [
- "bake-macros",
- "linkme",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "stable_deref_trait"

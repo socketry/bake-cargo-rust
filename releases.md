@@ -1,5 +1,9 @@
 # Releases
 
+## v0.2.3
+
+- Switch the runtime dependency from `socketry-bake` to `bake` 0.17.0.
+
 ## v0.2.2
 
 - Correct the bootstrap task name in publishing guidance.
