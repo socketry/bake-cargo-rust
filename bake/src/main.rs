@@ -2,6 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::{Context, Registry, Result};
+use bake_agent_context as _;
 use bake_cargo as _;
 use bake_license as _;
 use bake_releases as _;

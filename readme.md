@@ -26,7 +26,10 @@ versions when this crate is published.
 For the first publication, publish `socketry-bake`, `bake-releases`, and
 `bake-license` before `bake-cargo`; this crate depends on all three registry
 packages.
-Follow the shared [Socketry Rust conventions](https://github.com/socketry/bake-rust/blob/main/conventions.md).
+The task executable also links Bake Agent Context. Run
+`cargo bake agent:context:install` to install context from dependencies such as
+`socketry-bake`; generated `.agents/context/` files are ignored by Git. Shared
+Rust guidance lives in [Bake Agent Context](https://github.com/socketry/bake-agent-context-rust/blob/main/context/rust.md).
 
 ## Inspect and package
 
