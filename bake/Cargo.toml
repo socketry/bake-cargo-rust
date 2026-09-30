@@ -5,8 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2.1" }
-bake-agent-context = { version = "0.1.0" }
-bake_cargo = { package = "bake-cargo", version = "0.2.2", path = ".." }
-bake_license = { package = "bake-license", version = "0.1.0" }
-bake_releases = { package = "bake-releases", version = "0.2.0" }
+bake = "0.17.0"
+bake-agent-context = "0.1.1"
+bake_cargo = { package = "bake-cargo", path = ".." }
+bake_license = { package = "bake-license", version = "0.1.1" }
+bake_releases = { package = "bake-releases", version = "0.2.1" }
