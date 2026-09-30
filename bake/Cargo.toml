@@ -1,0 +1,11 @@
+[package]
+name = "bake-cargo-project"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bake = { package = "socketry-bake", version = "0.2.1", path = "../../bake-rust" }
+bake_cargo = { package = "bake-cargo", version = "0.2.0", path = ".." }
+bake_license = { package = "bake-license", version = "0.1.0", path = "../../bake-license-rust" }
+bake_releases = { package = "bake-releases", version = "0.2.0", path = "../../bake-releases-rust" }

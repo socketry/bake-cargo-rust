@@ -8,7 +8,14 @@ description = "Cargo project and release automation tasks for Bake"
 readme = "readme.md"
 include = ["src/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
 
-[package.metadata.bake.release]
+[workspace]
+members = ["bake"]
+resolver = "3"
+
+[workspace.metadata.bake]
+manifest = "bake/Cargo.toml"
+
+[workspace.metadata.bake.release]
 reviewers = ["socketry/managers"]
 
 [lib]

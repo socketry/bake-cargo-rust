@@ -23,6 +23,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bake-cargo-project"
+version = "0.0.0"
+dependencies = [
+ "bake-cargo",
+ "bake-license",
+ "bake-releases",
+ "socketry-bake",
+]
+
+[[package]]
 name = "bake-license"
 version = "0.1.0"
 dependencies = [
