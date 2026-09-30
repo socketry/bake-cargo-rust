@@ -7,7 +7,7 @@ it once:
 
 ```toml
 [dependencies]
-bake-cargo = { version = "0.1" }
+bake-cargo = { version = "0.2" }
 ```
 
 ```rust,ignore

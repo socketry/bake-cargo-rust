@@ -1,9 +1,11 @@
+// Released under the MIT License.
+// Copyright, 2026, by Samuel Williams.
+
 //! Cargo project and release tasks for Bake.
 //!
 //! The reusable tasks register beneath `cargo`. They inspect workspace metadata,
 //! manage Cargo versions and packages, and configure GitHub and crates.io
 //! publication. The crate also provides a GitHub release task using `releases.md`.
-
 #[path = "cargo.rs"]
 mod cargo_support;
 mod crates_io;

@@ -1,3 +1,6 @@
+// Released under the MIT License.
+// Copyright, 2026, by Samuel Williams.
+
 /// GitHub release creation using notes from `releases.md`.
 pub mod github {
     use bake::{Context, Error, Result};

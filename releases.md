@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.2.0
 
 - Add an optional `cargo:after_version_bump` project hook for version-specific automation.
 
