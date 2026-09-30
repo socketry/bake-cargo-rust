@@ -7,6 +7,6 @@ publish = false
 [dependencies]
 bake = { package = "socketry-bake", version = "0.2.1" }
 bake-agent-context = { version = "0.1.0" }
-bake_cargo = { package = "bake-cargo", version = "0.2.1", path = ".." }
+bake_cargo = { package = "bake-cargo", version = "0.2.2", path = ".." }
 bake_license = { package = "bake-license", version = "0.1.0" }
 bake_releases = { package = "bake-releases", version = "0.2.0" }

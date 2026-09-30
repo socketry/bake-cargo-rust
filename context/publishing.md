@@ -42,7 +42,7 @@ their own deployment; the configured reviewer list still gates publication.
 GitHub administrators may bypass environment reviewers unless administrator
 bypass is disabled in the environment settings.
 
-For a package's first release, `cargo:trusted-publishing:bootstrap` publishes
+For a package's first release, `cargo:bootstrap` publishes
 with a crates.io owner token and registers the GitHub Actions trusted publisher.
 Afterward, the workflow uses GitHub OIDC to obtain a short-lived publishing
 token. Configure the crates.io publisher with the correct GitHub repository,

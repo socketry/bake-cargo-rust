@@ -1,5 +1,9 @@
 # Releases
 
+## v0.2.2
+
+- Correct the bootstrap task name in publishing guidance.
+
 ## v0.2.1
 
 - Add Bake Agent Context tasks to the project's development executable.
