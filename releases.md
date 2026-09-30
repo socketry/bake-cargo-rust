@@ -1,9 +1,11 @@
 # Releases
 
-## Unreleased
+## v0.2.1
 
 - Add Bake Agent Context tasks to the project's development executable.
 - Link the shared Rust context guidance from the README.
+- Allow the workflow initiator to approve the crates.io deployment.
+- Use the generated `check` job as the default required branch check.
 
 ## v0.2.0
 

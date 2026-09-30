@@ -96,7 +96,7 @@ pub(crate) fn validate_branch(branch: &str) -> Result<()> {
 
 pub(crate) fn effective_checks(checks: &[String]) -> Vec<String> {
     if checks.is_empty() {
-        vec!["Publish to crates.io / check".to_owned()]
+        vec!["check".to_owned()]
     } else {
         checks.to_vec()
     }
@@ -248,12 +248,15 @@ pub(crate) fn setup_plan(
     wait_timer: Option<u32>,
     environment: &str,
 ) -> Value {
+    let mut environment_settings = environment_payload(&reviewers.resolved, wait_timer, None);
+    environment_settings["name"] = json!(environment);
+
     json!({
         "repository": repository.full_name(),
         "branch_ruleset": branch_ruleset(branch, approvals, checks),
         "tag_ruleset": tag_ruleset(),
         "reviewers": {"configured": reviewers.configured, "resolved": reviewers.resolved},
-        "environment": environment_payload(environment, &reviewers.resolved, wait_timer, None),
+        "environment": environment_settings,
         "preservation": "Existing environment settings are preserved unless overridden above.",
         "apply": "cargo:setup:github:apply",
     })
@@ -303,12 +306,11 @@ fn tag_ruleset() -> JsonValue {
 }
 
 fn environment_payload(
-    environment: &str,
     requested_reviewers: &[String],
     wait_timer: Option<u32>,
     existing: Option<&JsonValue>,
 ) -> JsonValue {
-    let mut payload = json!({"name": environment});
+    let mut payload = json!({});
     let existing_protection_rules = existing
         .and_then(|environment| environment.get("protection_rules"))
         .and_then(JsonValue::as_array);
@@ -328,7 +330,7 @@ fn environment_payload(
             .filter_map(|reviewer| parse_reviewer(reviewer).ok())
             .map(|(kind, identifier)| json!({"type": kind, "id": identifier}))
             .collect();
-        payload["prevent_self_review"] = json!(true);
+        payload["prevent_self_review"] = json!(false);
         payload["reviewers"] = json!(reviewers);
     } else if let Some(existing_rules) = existing_protection_rules
         && let Some(review_rule) = existing_rules
@@ -411,12 +413,8 @@ pub(crate) fn apply_setup(
 
     let branch_result = upsert_ruleset(context, repository, &branch_ruleset)?;
     let tag_result = upsert_ruleset(context, repository, &tag_ruleset)?;
-    let environment_body = environment_payload(
-        environment,
-        reviewers,
-        wait_timer,
-        existing_environment.as_ref(),
-    );
+    let environment_body =
+        environment_payload(reviewers, wait_timer, existing_environment.as_ref());
     let environment_path = format!(
         "repos/{}/environments/{}",
         repository.full_name(),
@@ -517,14 +515,21 @@ mod tests {
 
     #[test]
     fn defaults_to_the_generated_workflow_check() {
-        assert_eq!(
-            effective_checks(&[]),
-            vec!["Publish to crates.io / check".to_owned()]
-        );
+        assert_eq!(effective_checks(&[]), vec!["check".to_owned()]);
         assert_eq!(
             effective_checks(&["custom check".to_owned()]),
             vec!["custom check".to_owned()]
         );
+    }
+
+    #[test]
+    fn environment_setup_allows_the_initiator_to_approve() {
+        let payload = environment_payload(&["User:123".to_owned()], None, None);
+
+        assert!(!payload["prevent_self_review"].as_bool().unwrap());
+        assert_eq!(payload["reviewers"][0]["type"], "User");
+        assert_eq!(payload["reviewers"][0]["id"], 123);
+        assert!(payload.get("name").is_none());
     }
 
     #[test]

@@ -22,12 +22,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Check out local path dependencies for development
-        run: |
-          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-agent-context-rust.git ../bake-agent-context-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -144,12 +138,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Check out local path dependencies for development
-        run: |
-          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-agent-context-rust.git ../bake-agent-context-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
       - uses: dtolnay/rust-toolchain@stable
       - name: Find workspace packages that need publishing
         id: packages

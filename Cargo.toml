@@ -1,12 +1,12 @@
 [package]
 name = "bake-cargo"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/socketry/bake-cargo-rust"
 description = "Cargo project and release automation tasks for Bake"
 readme = "readme.md"
-include = ["src/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
+include = ["src/**", "context/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
 
 [workspace]
 members = ["bake"]
@@ -22,9 +22,9 @@ reviewers = ["socketry/managers"]
 name = "bake_cargo"
 
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2.1", path = "../bake-rust" }
-bake-releases = { version = "0.2.0", path = "../bake-releases-rust" }
-bake-license = { version = "0.1.0", path = "../bake-license-rust" }
+bake = { package = "socketry-bake", version = "0.2.1" }
+bake-releases = { version = "0.2.0" }
+bake-license = { version = "0.1.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ureq = { version = "2.12", features = ["json"] }
