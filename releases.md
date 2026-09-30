@@ -11,9 +11,6 @@
 - Require environment reviewers before publishing and create version tags after successful uploads.
 - Turn `cargo:release` into a release-candidate check instead of creating tags.
 - Generate workflows that discover workspace packages dynamically.
-
-## v0.1.0
-
 - Move the Cargo, GitHub, and crates.io release tasks into their own repository.
 - Support Cargo workspace discovery, publishing workflow setup, and trusted publishing.
 - Add shared workspace version bumps and a tag-based release task.
