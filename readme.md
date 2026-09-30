@@ -15,8 +15,8 @@ use bake_cargo as _;
 ```
 
 This crate links `bake-releases` and `bake-license`, so release-document tasks
-and `license:update` are also available without extra imports. Each Cargo
-version task runs `license:update` automatically. When working from this repository,
+and `license:update` are also available without extra imports. When working
+from this repository,
 check out [bake-rust](https://github.com/socketry/bake-rust),
 [bake-releases](https://github.com/socketry/bake-releases-rust), and
 [bake-license](https://github.com/socketry/bake-license-rust) beside it under the
@@ -45,10 +45,23 @@ The `cargo:version:patch`, `cargo:version:minor`, and `cargo:version:major`
 tasks update the shared stable version of all publishable packages in the
 workspace. `cargo:version:bump --version X.Y.Z` sets an explicit higher version.
 These tasks preserve TOML
-formatting, update local path dependency requirements, refresh `Cargo.lock`,
-and run `license:update` to refresh copyright information. They do not update
-`releases.md` or commit the changes; review the edits and use
-`releases:update vX.Y.Z` before committing the release.
+formatting and update local path dependency requirements and `Cargo.lock`.
+After the update, they optionally call a project task named
+`cargo:after_version_bump`, passing the new version. If that task is absent,
+the version bump completes without a hook. A project can use the hook to run
+`license:update`, update `releases.md`, or perform other project-specific work:
+
+```rust,ignore
+#[bake::task(name = "cargo:after_version_bump")]
+fn after_version_bump(context: &mut bake::Context, version: String) -> bake::Result<()> {
+    context.call("license:update", &[])?;
+    let heading = format!("v{version}");
+    context.call("releases:update", &[&heading])?;
+    Ok(())
+}
+```
+
+Review the changes made by the hook before committing the release.
 
 After updating the shared version and adding the matching release-notes heading,
 run `cargo:release` to validate and package the release candidate. It

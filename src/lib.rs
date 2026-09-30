@@ -289,7 +289,19 @@ pub mod cargo {
 
     /// Change the shared stable version of the publishable Cargo workspace packages.
     pub mod version {
-        use bake::{Context, Result, Value};
+        use bake::{Context, Error, Result, Value};
+
+        fn run_after_version_bump(context: &mut Context, result: &Value) -> Result<()> {
+            let version = result
+                .get("version")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    Error::new("version task did not return the new workspace version")
+                })?;
+
+            context.call_if_registered("cargo:after_version_bump", &[version])?;
+            Ok(())
+        }
 
         /// Increment the patch component of the workspace version.
         #[bake::task]
@@ -298,7 +310,7 @@ pub mod cargo {
                 context,
                 crate::version_support::Component::Patch,
             )?;
-            context.call("license:update", &[])?;
+            run_after_version_bump(context, &result)?;
             Ok(result)
         }
 
@@ -309,7 +321,7 @@ pub mod cargo {
                 context,
                 crate::version_support::Component::Minor,
             )?;
-            context.call("license:update", &[])?;
+            run_after_version_bump(context, &result)?;
             Ok(result)
         }
 
@@ -320,7 +332,7 @@ pub mod cargo {
                 context,
                 crate::version_support::Component::Major,
             )?;
-            context.call("license:update", &[])?;
+            run_after_version_bump(context, &result)?;
             Ok(result)
         }
 
@@ -335,8 +347,40 @@ pub mod cargo {
             version: String,
         ) -> Result<Value> {
             let result = crate::version_support::set(context, &version)?;
-            context.call("license:update", &[])?;
+            run_after_version_bump(context, &result)?;
             Ok(result)
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use bake::Registry;
+
+            #[bake::task(name = "cargo:after_version_bump")]
+            fn capture_version(context: &mut Context, version: String) -> Result<()> {
+                context.insert(version);
+                Ok(())
+            }
+
+            #[test]
+            fn hook_is_optional() {
+                let mut context = Registry::new().context(".");
+                let result = serde_json::json!({"version": "1.2.3"});
+
+                run_after_version_bump(&mut context, &result).unwrap();
+                assert!(context.get::<String>().is_none());
+            }
+
+            #[test]
+            fn hook_receives_the_new_workspace_version() {
+                let mut registry = Registry::new();
+                registry.register(capture_version_task()).unwrap();
+                let mut context = registry.context(".");
+                let result = serde_json::json!({"version": "1.2.3"});
+
+                run_after_version_bump(&mut context, &result).unwrap();
+                assert_eq!(context.get::<String>().map(String::as_str), Some("1.2.3"));
+            }
         }
     }
 }

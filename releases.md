@@ -2,10 +2,12 @@
 
 ## Unreleased
 
+- Add an optional `cargo:after_version_bump` project hook for version-specific automation.
+
 ## v0.1.0
 
 - Rename the Cargo task library to `bake-cargo` and give its tasks a Cargo namespace.
-- Run `license:update` automatically after Cargo version changes.
+- Let project-local hooks compose license and release-note updates after Cargo version changes.
 - Keep `bake-releases` focused on release-document tasks.
 - Publish Cargo workspaces after reviewed release changes merge to the configured branch.
 - Require environment reviewers before publishing and create version tags after successful uploads.
