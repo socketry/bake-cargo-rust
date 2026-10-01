@@ -185,3 +185,11 @@ commit changes or publish crates itself. The GitHub release task publishes a
 GitHub Release explicitly. The setup task only manages its named repository
 rulesets, and GitHub may require repository or organization plan features for
 some settings.
+
+## Contributing
+
+Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-cargo-rust).
+
+### Agent Context
+
+Before contributing, read `agents.md` and the relevant context files it links. If `agents.md` is missing or out of date, run `cargo bake agent:context:install` to install context from dependencies and update the index.
