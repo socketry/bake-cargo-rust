@@ -51,6 +51,13 @@ or use `socketry-project` to link the standard project tasks. Generate
 `.github/workflows/publish.yml` with `cargo bake cargo:setup:workflow`. Review
 the generated file before replacing an existing workflow.
 
+If the private `bake/` package uses tasks from the crate in the same repository,
+declare that dependency with both its version and a relative path to the local
+crate. Keep `bake/` set to `publish = false`. Version-bump tasks then update the
+dependency to the target version and Cargo resolves it from the checkout, even
+before that version exists on crates.io. This path is confined to the private
+task package and is not included in the published crate.
+
 Set required environment reviewers in Cargo metadata:
 
 ```toml
