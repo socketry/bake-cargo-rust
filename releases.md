@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.2.6
 
 - Validate release headings from parsed Markdown in both Bake and the publishing workflow.
 
