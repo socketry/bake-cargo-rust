@@ -1,5 +1,9 @@
 # Releases
 
+## v0.2.5
+
+- Document local path dependencies for private same-repository Bake packages.
+
 ## v0.2.4
 
 - Create and synchronize GitHub Releases from `releases.md` after crates.io publication.

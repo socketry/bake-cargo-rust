@@ -33,23 +33,7 @@ dependencies = [
 
 [[package]]
 name = "bake-cargo"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28a535d36e69384bf2066455baab73ed5794a3bd95c9e9866611d399cc308bb9"
-dependencies = [
- "bake",
- "bake-license",
- "bake-releases",
- "serde",
- "serde_json",
- "tempfile",
- "toml_edit",
- "ureq",
-]
-
-[[package]]
-name = "bake-cargo"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "bake",
  "bake-license",
@@ -67,7 +51,7 @@ version = "0.0.0"
 dependencies = [
  "bake",
  "bake-agent-context",
- "bake-cargo 0.2.3",
+ "bake-cargo",
  "bake-license",
  "bake-releases",
 ]
