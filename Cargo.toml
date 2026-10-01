@@ -22,6 +22,7 @@ reviewers = ["socketry/managers"]
 name = "bake_cargo"
 
 [dependencies]
+socketry-markdown = "0.1.0"
 bake = "0.17.0"
 bake-releases = "0.2.1"
 bake-license = "0.1.1"

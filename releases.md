@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Validate release headings from parsed Markdown in both Bake and the publishing workflow.
+
 ## v0.2.5
 
 - Document local path dependencies for private same-repository Bake packages.

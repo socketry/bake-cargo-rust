@@ -276,7 +276,10 @@ mod tests {
         assert!(workflow.contains("cargo test --workspace --locked"));
         assert!(workflow.contains("id: detect"));
         assert!(workflow.contains("github.event.before || github.event.pull_request.base.sha"));
-        assert!(workflow.contains("releases.md must contain a '## v{version}' heading"));
+        assert!(workflow.contains("cargo install socketry-cargo-bake --locked"));
+        assert!(workflow.contains("Verify release notes"));
+        assert!(workflow.contains("cargo bake --locked releases:notes"));
+        assert!(workflow.contains("releases.md must contain a '## v"));
         assert!(workflow.contains("environment: crates-io"));
         assert!(workflow.contains("contents: write"));
         assert!(workflow.contains("Create release tag after successful publication"));

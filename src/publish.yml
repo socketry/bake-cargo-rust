@@ -102,11 +102,6 @@ jobs:
                       output.write("release=false\nversion=\n")
                   raise SystemExit(0)
 
-          release_notes = (root / "releases.md").read_text()
-          heading = re.compile(rf"^## v{re.escape(version)}(?:\s|$)", re.MULTILINE)
-          if heading.search(release_notes) is None:
-              raise SystemExit(f"releases.md must contain a '## v{version}' heading")
-
           tag = f"v{version}"
           existing = subprocess.run(
               ["git", "rev-list", "-n", "1", f"refs/tags/{tag}"], capture_output=True, text=True
@@ -117,6 +112,18 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"release=true\nversion={version}\n")
           PY
+      - name: Install Bake launcher
+        if: steps.detect.outputs.release == 'true'
+        run: cargo install socketry-cargo-bake --locked
+      - name: Verify release notes
+        if: steps.detect.outputs.release == 'true'
+        env:
+          BAKE_VERSION: ${{ steps.detect.outputs.version }}
+        run: |
+          if ! cargo bake --locked releases:notes "v${BAKE_VERSION}" > /dev/null; then
+            echo "releases.md must contain a '## v${BAKE_VERSION}' heading" >&2
+            exit 1
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy

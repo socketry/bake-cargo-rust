@@ -3,6 +3,7 @@
 
 use bake::{Context, Error, Result, Value};
 use serde_json::json;
+use socketry_markdown::{ParseOptions, mdast::Node, to_mdast};
 use std::fs;
 
 pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
@@ -41,11 +42,26 @@ pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
 }
 
 fn contains_release_heading(release_notes: &str, version: &str) -> bool {
-    let heading = format!("## v{version}");
-    release_notes.lines().any(|line| {
-        line.strip_prefix(&heading).is_some_and(|remainder| {
-            remainder.is_empty() || remainder.chars().next().is_some_and(char::is_whitespace)
-        })
+    let Ok(root) = to_mdast(release_notes, &ParseOptions::default()) else {
+        return false;
+    };
+    let Some(children) = root.children() else {
+        return false;
+    };
+    let expected = format!("v{version}");
+
+    children.iter().any(|node| {
+        let Node::Heading(heading) = node else {
+            return false;
+        };
+        if heading.depth != 2 {
+            return false;
+        }
+        node.text_content()
+            .strip_prefix(&expected)
+            .is_some_and(|remainder| {
+                remainder.is_empty() || remainder.chars().next().is_some_and(char::is_whitespace)
+            })
     })
 }
 
@@ -65,5 +81,10 @@ mod tests {
         ));
         assert!(!contains_release_heading("## v1.2.30\n", "1.2.3"));
         assert!(!contains_release_heading("## v1.2.3-rc.1\n", "1.2.3"));
+        assert!(!contains_release_heading(
+            "```markdown\n## v1.2.3\n```\n",
+            "1.2.3"
+        ));
+        assert!(!contains_release_heading("> ## v1.2.3\n", "1.2.3"));
     }
 }
