@@ -1,5 +1,9 @@
 # Releases
 
+## v0.2.4
+
+- Create and synchronize GitHub Releases from `releases.md` after crates.io publication.
+
 ## v0.2.3
 
 - Switch the runtime dependency from `socketry-bake` to `bake` 0.17.0.

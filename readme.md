@@ -193,3 +193,12 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 ### Agent Context
 
 Before contributing, read `agents.md` and the relevant context files it links. If `agents.md` is missing or out of date, run `cargo bake agent:context:install` to install context from dependencies and update the index.
+
+## Releasing
+
+Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`,
+or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a
+pull request. After review and merge, GitHub Actions publishes the release
+when the configured `crates-io` environment approves it, then creates or updates
+the matching GitHub Release from `releases.md`. See the
+[Cargo publishing guide](https://github.com/socketry/bake-cargo-rust/blob/main/context/publishing.md).
