@@ -1,5 +1,9 @@
 # Releases
 
+## v0.2.7
+
+- Use the pull request base commit when detecting release changes.
+
 ## v0.2.6
 
 - Validate release headings from parsed Markdown in both Bake and the publishing workflow.
