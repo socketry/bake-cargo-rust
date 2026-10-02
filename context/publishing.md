@@ -46,10 +46,12 @@ update a draft.
 
 ## Initial publication
 
-Link `bake-cargo` from the private `bake/` task package with `use bake_cargo as _;`,
-or use `socketry-project` to link the standard project tasks. Generate
-`.github/workflows/publish.yml` with `cargo bake cargo:setup:workflow`. Review
-the generated file before replacing an existing workflow.
+Link `bake-cargo` from the private `bake/` task package, or add
+`socketry-project` there to link the standard project tasks and hooks. Run
+`cargo bake --regenerate` after changing task dependencies so the executable
+links them. Generate `.github/workflows/publish.yml` with
+`cargo bake cargo:setup:workflow`. Review the generated file before replacing an
+existing workflow.
 
 If the private `bake/` package uses tasks from the crate in the same repository,
 declare that dependency with both its version and a relative path to the local
