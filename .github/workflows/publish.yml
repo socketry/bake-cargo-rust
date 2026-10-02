@@ -28,7 +28,7 @@ jobs:
       - name: Detect a versioned release change
         id: detect
         env:
-          BAKE_BEFORE: ${{ github.event.before || github.event.pull_request.base.sha }}
+          BAKE_BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
           BAKE_SHA: ${{ github.sha }}
         run: |
           cargo metadata --format-version 1 --no-deps --locked > "$RUNNER_TEMP/bake-metadata.json"

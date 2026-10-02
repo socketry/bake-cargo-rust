@@ -275,7 +275,7 @@ mod tests {
 
         assert!(workflow.contains("cargo test --workspace --locked"));
         assert!(workflow.contains("id: detect"));
-        assert!(workflow.contains("github.event.before || github.event.pull_request.base.sha"));
+        assert!(workflow.contains("github.event.pull_request.base.sha || github.event.before"));
         assert!(workflow.contains("cargo install socketry-cargo-bake --locked"));
         assert!(workflow.contains("Verify release notes"));
         assert!(workflow.contains("cargo bake --locked releases:notes"));
@@ -299,7 +299,7 @@ mod tests {
         assert!(workflow.contains("[\"cargo\", \"publish\", \"--workspace\", \"--locked\"]"));
         assert!(workflow.contains("--exclude"));
         assert!(workflow.contains(
-            "BAKE_BEFORE: ${{ github.event.before || github.event.pull_request.base.sha }}"
+            "BAKE_BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}"
         ));
         assert!(!workflow.contains("__BRANCH__"));
         assert!(workflow.contains("      - main\n"));
