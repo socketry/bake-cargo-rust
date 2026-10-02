@@ -17,14 +17,16 @@ use bake_cargo as _;
 
 This crate links `bake-releases` and `bake-license`, so release-document tasks
 and `license:update` are also available without extra imports. The task
-executable also links Bake Agent Context. Run
-`cargo bake agent:context:install` to install context from dependencies such as
-`bake`; generated `.agents/context/` files are ignored by Git.
+executable links `socketry-project`, which provides the standard project tasks
+and hooks. Run `cargo bake agent:context:install` to install context from
+dependencies such as `bake`; generated context and skills are excluded locally
+through Git's `info/exclude` file and do not add rules to `.gitignore`.
 Shared Rust guidance lives in
 [Bake Agent Context](https://github.com/socketry/bake-agent-context-rust/blob/main/context/rust.md).
 This crate also publishes guidance in
 [`context/publishing.md`](context/publishing.md). Link Bake Agent Context in
 your private `bake/` package, directly or through `socketry-project`, then run
+`cargo bake --regenerate` to link its tasks and
 `cargo bake agent:context:install` to install guidance from dependencies.
 
 ## Inspect and package
@@ -59,6 +61,9 @@ fn after_version_bump(context: &mut bake::Context, version: String) -> bake::Res
     Ok(())
 }
 ```
+
+Projects using `socketry-project` get a standard hook that updates the license,
+release notes, and generated Readme sections.
 
 Review the changes made by the hook before committing the release.
 

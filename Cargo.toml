@@ -31,3 +31,6 @@ serde_json = "1.0"
 ureq = { version = "2.12", features = ["json"] }
 tempfile = "3.27"
 toml_edit = "0.25"
+
+[patch.crates-io]
+bake-cargo = { path = "." }
