@@ -14,6 +14,9 @@ mod release;
 #[path = "version.rs"]
 mod version_support;
 
+#[cfg(test)]
+mod test_support;
+
 use bake_license as _;
 use bake_releases as _;
 
@@ -120,14 +123,9 @@ pub mod cargo {
             }
 
             let contents = cargo_helpers::publish_workflow(&packages, &branch)?;
-            let path = context
-                .root()
-                .join(".github")
-                .join("workflows")
-                .join(filename);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
+            let workflow_directory = context.root().join(".github").join("workflows");
+            fs::create_dir_all(&workflow_directory)?;
+            let path = workflow_directory.join(filename);
 
             if path.exists() {
                 let existing = fs::read_to_string(&path)?;
@@ -364,6 +362,12 @@ pub mod cargo {
                 Ok(())
             }
 
+            #[bake::task(name = "cargo:after_version_bump")]
+            fn fail_version_hook(context: &mut Context, _version: String) -> Result<()> {
+                let _ = context;
+                Err(Error::new("hook failed"))
+            }
+
             #[test]
             fn hook_is_optional() {
                 let mut context = Registry::new().context(".");
@@ -383,9 +387,593 @@ pub mod cargo {
                 run_after_version_bump(&mut context, &result).unwrap();
                 assert_eq!(context.get::<String>().map(String::as_str), Some("1.2.3"));
             }
+
+            #[test]
+            fn rejects_missing_bump_versions_and_propagates_hook_errors() {
+                let mut context = Registry::new().context(".");
+                assert!(run_after_version_bump(&mut context, &serde_json::json!({})).is_err());
+
+                let mut registry = Registry::new();
+                registry.register(fail_version_hook_task()).unwrap();
+                let mut context = registry.context(".");
+                assert!(
+                    run_after_version_bump(&mut context, &serde_json::json!({"version": "1.2.3"}))
+                        .unwrap_err()
+                        .to_string()
+                        .contains("hook failed")
+                );
+            }
         }
     }
 }
 
 /// GitHub release creation using notes from the matching `releases.md` heading.
 pub mod releases;
+
+#[cfg(test)]
+mod task_tests {
+    use super::*;
+    use crate::test_support::{Environment, Project};
+    use bake::{Registry, Result};
+    use std::process::Command;
+
+    fn project() -> Project {
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        project.write(
+            "Cargo.toml",
+            "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n\n[workspace]\nmembers = [\"bake\"]\nresolver = \"3\"\n\n[workspace.metadata.bake.release]\nreviewers = [\"User:123\"]\n",
+        );
+        project.write(
+            "bake/Cargo.toml",
+            "[package]\nname = \"fixture-bake\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n",
+        );
+        project.write("bake/src/lib.rs", "// fixture\n");
+        project.write(
+            "releases.md",
+            "# Releases\n\n## v1.2.3\n\nInitial release.\n",
+        );
+        project
+    }
+
+    fn git_origin(project: &Project) {
+        assert!(
+            Command::new("git")
+                .current_dir(project.root())
+                .args(["init", "--quiet"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(project.root())
+                .args([
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/socketry/fixture.git"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    fn install_gh(project: &Project, environment: &mut Environment, script: &str) {
+        project.executable("gh", script);
+        environment.prepend_path(&project.root().join("bin"));
+    }
+
+    fn test_api(environment: &mut Environment, api: &str) {
+        environment.set("CARGO_REGISTRY_TOKEN", "test-token");
+        environment.set("BAKE_TEST_CRATES_IO_API", api);
+    }
+
+    #[bake::task(name = "cargo:after_version_bump")]
+    fn record_version(context: &mut bake::Context, version: String) -> Result<()> {
+        context.insert(version);
+        Ok(())
+    }
+
+    #[test]
+    fn exposes_package_release_and_direct_cargo_tasks() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+
+        let packages = cargo::packages(&mut context).unwrap();
+        assert_eq!(packages[0]["name"], "fixture");
+        assert_eq!(
+            cargo::create_package_archive(&mut context, "fixture".to_owned()).unwrap(),
+            "Packaged fixture"
+        );
+        assert_eq!(
+            cargo::publish(&mut context, "fixture".to_owned()).unwrap(),
+            "Published fixture"
+        );
+        let prepared = cargo::release(&mut context).unwrap();
+        assert_eq!(prepared["version"], "1.2.3");
+        assert!(prepared["packages"][0].as_str() == Some("fixture"));
+        assert!(
+            project
+                .cargo_arguments()
+                .contains("package --locked --package fixture")
+        );
+    }
+
+    #[test]
+    fn propagates_cargo_packaging_and_publish_failures() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, Some("package"));
+        let mut context = project.context();
+        assert!(cargo::create_package_archive(&mut context, "fixture".to_owned()).is_err());
+
+        environment.set("BAKE_TEST_CARGO_FAILURE", "publish");
+        assert!(cargo::publish(&mut context, "fixture".to_owned()).is_err());
+    }
+
+    #[test]
+    fn creates_workflow_then_preserves_or_replaces_existing_content() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+
+        let generated = cargo::setup::workflow(
+            &mut context,
+            "publish.yml".to_owned(),
+            "main".to_owned(),
+            false,
+        )
+        .unwrap();
+        assert!(generated.contains("Generated"));
+        let path = project.root().join(".github/workflows/publish.yml");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("      - main\n"));
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .unwrap()
+            .contains("already matches")
+        );
+
+        std::fs::write(&path, "owner content\n").unwrap();
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                true
+            )
+            .unwrap()
+            .contains("Generated")
+        );
+        assert!(
+            std::fs::read_to_string(path)
+                .unwrap()
+                .contains("cargo bake --locked")
+        );
+
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "../publish.yml".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "invalid.txt".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            cargo::setup::workflow(
+                &mut context,
+                "other.yml".to_owned(),
+                "feature/release".to_owned(),
+                false
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_inconsistently_versioned_publish_workspaces() {
+        let mut environment = Environment::new();
+        let empty = Project::new();
+        empty.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"private\"]\nresolver = \"3\"\n",
+        );
+        empty.write("private/Cargo.toml", "[package]\nname = \"private\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n");
+        empty.write("private/src/lib.rs", "// private\n");
+        empty.cargo_proxy(&mut environment, None);
+        let mut empty_context = empty.context();
+        assert!(
+            cargo::setup::workflow(
+                &mut empty_context,
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            cargo::packages(&mut empty_context)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            cargo::setup::github::plan(
+                &mut empty_context,
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                1,
+                Vec::new(),
+                vec!["User:123".to_owned()],
+                None,
+                "crates-io".to_owned(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("no publishable packages")
+        );
+
+        let mixed = Project::new();
+        mixed.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"first\", \"second\"]\nresolver = \"3\"\n",
+        );
+        mixed.write(
+            "first/Cargo.toml",
+            "[package]\nname = \"first\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        mixed.write("first/src/lib.rs", "// first\n");
+        mixed.write(
+            "second/Cargo.toml",
+            "[package]\nname = \"second\"\nversion = \"1.2.4\"\nedition = \"2024\"\n",
+        );
+        mixed.write("second/src/lib.rs", "// second\n");
+        mixed.cargo_proxy(&mut environment, None);
+        let mut mixed_context = mixed.context();
+        assert!(
+            cargo::setup::workflow(
+                &mut mixed_context,
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("share one version")
+        );
+    }
+
+    #[test]
+    fn plans_github_setup_using_workspace_reviewers_and_explicit_repositories() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+
+        let plan = cargo::setup::github::plan(
+            &mut context,
+            "socketry/fixture".to_owned(),
+            "main".to_owned(),
+            1,
+            Vec::new(),
+            Vec::new(),
+            None,
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(plan["repository"], "socketry/fixture");
+        assert_eq!(plan["reviewers"]["resolved"][0], "User:123");
+        assert_eq!(
+            plan["branch_ruleset"]["rules"][1]["parameters"]["required_status_checks"][0]["context"],
+            "check"
+        );
+
+        assert!(
+            cargo::setup::github::plan(
+                &mut context,
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                7,
+                Vec::new(),
+                vec!["User:123".to_owned()],
+                None,
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn applies_github_setup_using_the_generated_workspace_metadata() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        install_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/fixture/environments?per_page=100') printf '%s' '{\"environments\":[]}' ;;\n  'GET repos/socketry/fixture/rulesets?per_page=100') printf '%s' '[]' ;;\n  'POST repos/socketry/fixture/rulesets') cat >/dev/null; printf '%s' '{}' ;;\n  'PUT repos/socketry/fixture/environments/crates-io') cat >/dev/null; printf '%s' '{}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let mut context = project.context();
+        let result = cargo::setup::github::apply(
+            &mut context,
+            "socketry/fixture".to_owned(),
+            "main".to_owned(),
+            1,
+            Vec::new(),
+            Vec::new(),
+            None,
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        assert!(result.get("branch_ruleset").is_some());
+
+        let result = cargo::setup::github::apply(
+            &mut context,
+            "socketry/fixture".to_owned(),
+            "main".to_owned(),
+            1,
+            Vec::new(),
+            vec!["User:123".to_owned()],
+            None,
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        assert!(result.get("environment").is_some());
+
+        assert!(
+            cargo::setup::github::apply(
+                &mut context,
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                7,
+                Vec::new(),
+                vec!["User:123".to_owned()],
+                None,
+                "crates-io".to_owned(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("between zero and six")
+        );
+    }
+
+    #[test]
+    fn plans_configures_and_requires_trusted_publishing_through_local_registry_api() {
+        let mut environment = Environment::new();
+        let project = project();
+        git_origin(&project);
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+        let plan = cargo::trusted_publishing::plan(
+            &mut context,
+            "fixture".to_owned(),
+            "publish.yml".to_owned(),
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(plan["github_config"]["repository_owner"], "socketry");
+
+        let (api, server) = crate::crates_io::tests::mock_server(vec![
+            (200, r#"{"github_configs":[]}"#),
+            (
+                201,
+                r#"{"github_config":{"id":3,"crate":"fixture","repository_owner":"socketry","repository_name":"fixture","workflow_filename":"publish.yml","environment":"crates-io"}}"#,
+            ),
+            (200, r#"{"crate":{"trustpub_only":true}}"#),
+        ]);
+        test_api(&mut environment, &api);
+        let configured = cargo::trusted_publishing::configure(
+            &mut context,
+            "fixture".to_owned(),
+            "publish.yml".to_owned(),
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        let required =
+            cargo::trusted_publishing::require(&mut context, "fixture".to_owned(), true).unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(configured["status"], "created");
+        assert_eq!(required["trustpub_only"], true);
+        assert_eq!(requests.len(), 3);
+    }
+
+    #[test]
+    fn bootstraps_registry_publishing_after_the_initial_upload() {
+        let mut environment = Environment::new();
+        let project = project();
+        git_origin(&project);
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+        let (api, server) = crate::crates_io::tests::mock_server(vec![
+            (200, r#"{"github_configs":[]}"#),
+            (
+                201,
+                r#"{"github_config":{"id":3,"crate":"fixture","repository_owner":"socketry","repository_name":"fixture","workflow_filename":"publish.yml","environment":"crates-io"}}"#,
+            ),
+        ]);
+        test_api(&mut environment, &api);
+
+        let result = cargo::bootstrap(
+            &mut context,
+            "fixture".to_owned(),
+            "publish.yml".to_owned(),
+            "crates-io".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(result["initial_publish"], "complete");
+        assert_eq!(result["trusted_publisher"]["status"], "created");
+        assert!(
+            project
+                .cargo_arguments()
+                .contains("publish --locked --package fixture")
+        );
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn refuses_unsafe_bootstrap_inputs_and_reports_partial_publication() {
+        let mut environment = Environment::new();
+        environment.remove("CARGO_REGISTRY_TOKEN");
+        let project = project();
+        git_origin(&project);
+        project.cargo_proxy(&mut environment, Some("publish"));
+        let mut context = project.context();
+        assert!(
+            cargo::bootstrap(
+                &mut context,
+                "unknown".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("was not found")
+        );
+        assert!(
+            cargo::bootstrap(
+                &mut context,
+                "fixture".to_owned(),
+                "../publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+
+        environment.set("CARGO_REGISTRY_TOKEN", "test-token");
+        let error = cargo::bootstrap(
+            &mut context,
+            "fixture".to_owned(),
+            "publish.yml".to_owned(),
+            "crates-io".to_owned(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("initial crates.io publication failed")
+        );
+
+        environment.set("BAKE_TEST_CARGO_FAILURE", "");
+        let (api, server) =
+            crate::crates_io::tests::mock_server(vec![(403, "registry denied setup")]);
+        test_api(&mut environment, &api);
+        let error = cargo::bootstrap(
+            &mut context,
+            "fixture".to_owned(),
+            "publish.yml".to_owned(),
+            "crates-io".to_owned(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("was published, but trusted publisher setup failed")
+        );
+        assert!(error.to_string().contains("registry denied setup"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn invokes_the_after_version_bump_hook_for_each_version_task() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut registry = Registry::new();
+        registry.register(record_version_task()).unwrap();
+        let mut context = registry.context(project.root());
+
+        assert_eq!(
+            cargo::version::patch(&mut context).unwrap()["version"],
+            "1.2.4"
+        );
+        assert_eq!(context.get::<String>().map(String::as_str), Some("1.2.4"));
+        assert_eq!(
+            cargo::version::minor(&mut context).unwrap()["version"],
+            "1.3.0"
+        );
+        assert_eq!(
+            cargo::version::major(&mut context).unwrap()["version"],
+            "2.0.0"
+        );
+        assert_eq!(
+            cargo::version::bump(&mut context, "2.3.1".to_owned()).unwrap()["version"],
+            "2.3.1"
+        );
+        assert_eq!(context.get::<String>().map(String::as_str), Some("2.3.1"));
+    }
+
+    #[test]
+    fn reports_release_preparation_errors_without_running_cargo_package() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+        std::fs::remove_file(project.root().join("releases.md")).unwrap();
+        assert!(
+            cargo::release(&mut context)
+                .unwrap_err()
+                .to_string()
+                .contains("could not read")
+        );
+
+        project.write("releases.md", "# Releases\n\n## v1.2.2\n\nWrong version.\n");
+        assert!(
+            cargo::release(&mut context)
+                .unwrap_err()
+                .to_string()
+                .contains("must contain a")
+        );
+    }
+
+    #[test]
+    fn propagates_all_version_task_errors_for_an_empty_workspace() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"private\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "private/Cargo.toml",
+            "[package]\nname = \"private\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n",
+        );
+        project.write("private/src/lib.rs", "// private\n");
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+
+        assert!(cargo::version::patch(&mut context).is_err());
+        assert!(cargo::version::minor(&mut context).is_err());
+        assert!(cargo::version::major(&mut context).is_err());
+        assert!(cargo::version::bump(&mut context, "2.0.0".to_owned()).is_err());
+    }
+}

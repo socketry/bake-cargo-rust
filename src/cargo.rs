@@ -256,6 +256,264 @@ pub(crate) fn publish_workflow(packages: &[WorkspacePackage], branch: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{Environment, Project, shell_quote};
+
+    fn cargo_output(project: &Project, environment: &mut Environment, output: &str) {
+        let output = project.write("metadata.json", output);
+        let script = format!("#!/bin/sh\ncat {}\n", shell_quote(&output));
+        let cargo = project.executable("cargo-output", &script);
+        environment.set("CARGO", cargo.as_os_str());
+    }
+
+    fn workspace(project: &Project) {
+        project.write(
+            "Cargo.toml",
+            r#"[workspace]
+members = ["crates/alpha", "crates/private", "crates/registry"]
+resolver = "3"
+
+[workspace.metadata.bake.release]
+reviewers = ["Team:123"]
+"#,
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        project.write("crates/alpha/src/lib.rs", "// fixture\n");
+        project.write(
+            "crates/private/Cargo.toml",
+            "[package]\nname = \"private\"\nversion = \"1.2.3\"\nedition = \"2024\"\npublish = false\n",
+        );
+        project.write("crates/private/src/lib.rs", "// fixture\n");
+        project.write(
+            "crates/registry/Cargo.toml",
+            "[package]\nname = \"registry\"\nversion = \"1.2.3\"\nedition = \"2024\"\npublish = [\"internal\"]\n",
+        );
+        project.write("crates/registry/src/lib.rs", "// fixture\n");
+    }
+
+    #[test]
+    fn reads_reviewers_and_only_crates_io_publishable_packages_from_a_workspace() {
+        let _environment = Environment::new();
+        let project = Project::new();
+        workspace(&project);
+        let context = project.context();
+
+        assert_eq!(release_reviewers(&context).unwrap(), ["Team:123"]);
+        let packages = workspace_packages(&context).unwrap();
+        assert_eq!(
+            packages
+                .iter()
+                .map(|package| package.name.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha"]
+        );
+        assert_eq!(packages[0].version, "1.2.3");
+        assert!(
+            packages[0]
+                .manifest_path
+                .ends_with("crates/alpha/Cargo.toml")
+        );
+        assert_eq!(package_by_name(&context, "alpha").unwrap().name, "alpha");
+        assert!(package_by_name(&context, "private").is_err());
+    }
+
+    #[test]
+    fn reads_package_level_release_reviewers_for_a_single_package() {
+        let _environment = Environment::new();
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        project.write(
+            "Cargo.toml",
+            "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n\n[package.metadata.bake.release]\nreviewers = [\"ioquatix\"]\n",
+        );
+
+        assert_eq!(release_reviewers(&project.context()).unwrap(), ["ioquatix"]);
+    }
+
+    #[test]
+    fn discovers_workspace_packages_using_cargo_from_path() {
+        let mut environment = Environment::new();
+        environment.remove("CARGO");
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+
+        let packages = workspace_packages(&project.context()).unwrap();
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "fixture");
+    }
+
+    #[test]
+    fn cargo_commands_report_invalid_metadata_and_process_failures() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        let invalid_json =
+            project.executable("cargo-invalid-json", "#!/bin/sh\nprintf 'not json'\n");
+        environment.set("CARGO", invalid_json.as_os_str());
+        assert!(
+            release_reviewers(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("could not parse Cargo metadata")
+        );
+        assert!(
+            workspace_packages(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("could not parse Cargo metadata")
+        );
+
+        let invalid_packages = project.executable(
+            "cargo-invalid-packages",
+            "#!/bin/sh\nprintf '%s' '{\"packages\":{}}'\n",
+        );
+        environment.set("CARGO", invalid_packages.as_os_str());
+        assert!(
+            workspace_packages(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("packages array")
+        );
+
+        let failed = project.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho fixture failure >&2\nexit 7\n",
+        );
+        environment.set("CARGO", failed.as_os_str());
+        assert!(
+            run_cargo(&project.context(), ["publish", "--locked"])
+                .unwrap_err()
+                .to_string()
+                .contains("cargo publish --locked failed")
+        );
+        assert!(
+            run_cargo_arguments(
+                &project.context(),
+                &["package".to_owned(), "--locked".to_owned()]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("cargo package --locked failed")
+        );
+        assert!(
+            release_reviewers(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("fixture failure")
+        );
+
+        let missing = project.root().join("missing-cargo");
+        environment.set("CARGO", missing.as_os_str());
+        assert!(run_cargo(&project.context(), ["check"]).is_err());
+    }
+
+    #[test]
+    fn accepts_publish_registry_lists_when_crates_io_is_included() {
+        let _environment = Environment::new();
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.2.3\"\nedition = \"2024\"\npublish = [\"alternate\", \"crates-io\"]\n",
+        );
+        project.write("crates/alpha/src/lib.rs", "// fixture\n");
+
+        assert_eq!(
+            workspace_packages(&project.context()).unwrap()[0].name,
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn parses_cargo_publish_metadata_variants_and_sorts_packages() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        cargo_output(
+            &project,
+            &mut environment,
+            r#"{"packages":[
+                {"name":"zeta","version":"1.0.0","manifest_path":"zeta/Cargo.toml"},
+                {"name":"internal","version":"1.0.0","manifest_path":"internal/Cargo.toml","publish":["private"]},
+                {"name":"alpha","version":"1.0.0","manifest_path":"alpha/Cargo.toml","publish":null},
+                {"name":"enabled","version":"1.0.0","manifest_path":"enabled/Cargo.toml","publish":true},
+                {"name":"disabled","version":"1.0.0","manifest_path":"disabled/Cargo.toml","publish":false},
+                {"name":"unknown","version":"1.0.0","manifest_path":"unknown/Cargo.toml","publish":{"registry":"custom"}}
+            ]}"#,
+        );
+
+        let packages = workspace_packages(&project.context()).unwrap();
+        assert_eq!(
+            packages
+                .iter()
+                .map(|package| package.name.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "enabled", "unknown", "zeta"]
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_package_metadata() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        for (metadata, expected) in [
+            (r#"{"packages":[{}]}"#, "has no name"),
+            (r#"{"packages":[{"name":"alpha"}]}"#, "has no version"),
+            (
+                r#"{"packages":[{"name":"alpha","version":"1.0.0"}]}"#,
+                "has no manifest path",
+            ),
+        ] {
+            cargo_output(&project, &mut environment, metadata);
+            assert!(
+                workspace_packages(&project.context())
+                    .unwrap_err()
+                    .to_string()
+                    .contains(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn reports_missing_reviewer_metadata_and_malformed_reviewer_values() {
+        assert_eq!(
+            reviewers_from_metadata(&serde_json::json!({
+                "workspace_root": "/project",
+                "packages": []
+            }))
+            .unwrap(),
+            Vec::<String>::new()
+        );
+        assert!(
+            reviewers_from_metadata(&serde_json::json!({"metadata": null}))
+                .unwrap_err()
+                .to_string()
+                .contains("workspace root")
+        );
+        assert!(
+            reviewers_from_metadata(&serde_json::json!({
+                "metadata": {"bake": {"release": {"reviewers": [7]}}}
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("must contain strings")
+        );
+    }
+
+    #[test]
+    fn uses_cargo_from_path_when_the_cargo_environment_variable_is_absent() {
+        let mut environment = Environment::new();
+        environment.remove("CARGO");
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        run_cargo(&project.context(), ["--version"]).unwrap();
+        run_cargo_arguments(&project.context(), &["--version".to_owned()]).unwrap();
+        assert!(workspace_packages(&project.context()).is_ok());
+    }
 
     fn package(name: &str, version: &str) -> WorkspacePackage {
         WorkspacePackage {
@@ -313,6 +571,22 @@ mod tests {
                 "main",
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn generated_workflow_rejects_empty_package_lists_and_bad_branch_names() {
+        assert!(
+            publish_workflow(&[], "main")
+                .unwrap_err()
+                .to_string()
+                .contains("no publishable packages")
+        );
+        assert!(
+            publish_workflow(&[package("first", "1.2.3")], "release/1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("branch")
         );
     }
 }

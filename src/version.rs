@@ -169,9 +169,6 @@ fn set_workspace_version(
         updated.push((path, document.to_string()));
     }
 
-    if updated.is_empty() {
-        return Err(Error::new("no Cargo manifests were found to update"));
-    }
     for (path, contents) in &updated {
         replace_file(path, contents)?;
     }
@@ -361,6 +358,38 @@ fn replace_file(path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{Environment, Project, shell_quote};
+
+    fn fake_metadata(project: &Project, environment: &mut Environment, json: &str) {
+        let path = project.write("metadata.json", json);
+        let cargo = project.executable(
+            "cargo-metadata",
+            &format!("#!/bin/sh\ncat {}\n", shell_quote(&path)),
+        );
+        environment.set("CARGO", cargo.as_os_str());
+    }
+
+    fn workspace(project: &Project) {
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\", \"crates/beta\", \"bake\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \"1.2.3\"\nedition = \"2024\"\n\n[workspace.dependencies]\nbeta = { path = \"crates/beta\", version = \"1.2.3\" }\n",
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nbeta.workspace = true\n",
+        );
+        project.write("crates/alpha/src/lib.rs", "// fixture\n");
+        project.write(
+            "crates/beta/Cargo.toml",
+            "[package]\nname = \"beta\"\nversion.workspace = true\nedition.workspace = true\n",
+        );
+        project.write("crates/beta/src/lib.rs", "// fixture\n");
+        project.write(
+            "bake/Cargo.toml",
+            "[package]\nname = \"build-tools\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\nalpha = { path = \"../crates/alpha\", version = \"1.2.3\" }\n",
+        );
+        project.write("bake/src/lib.rs", "// fixture\n");
+    }
 
     fn package(name: &str, version: &str) -> WorkspacePackage {
         WorkspacePackage {
@@ -389,6 +418,7 @@ mod tests {
             "1.02.3",
             "1.2.03",
             "1.2.3-rc.1",
+            "18446744073709551616.0.0",
         ] {
             assert!(Version::parse(invalid).is_err(), "{invalid:?}");
         }
@@ -413,6 +443,18 @@ mod tests {
             Version::parse("18446744073709551615.0.0")
                 .unwrap()
                 .increment(Component::Major)
+                .is_err()
+        );
+        assert!(
+            Version::parse("0.18446744073709551615.0")
+                .unwrap()
+                .increment(Component::Minor)
+                .is_err()
+        );
+        assert!(
+            Version::parse("0.0.18446744073709551615")
+                .unwrap()
+                .increment(Component::Patch)
                 .is_err()
         );
     }
@@ -451,7 +493,7 @@ mod tests {
 
     #[test]
     fn updates_workspace_and_matching_local_dependency_versions() {
-        let source = "[package]\nname = \"first\"\nversion = \"0.1.0\"\n\n[dependencies]\nalias = { package = \"second\", version = \"0.1.0\", path = \"../second\" }\nunrelated = { package = \"other\", version = \"3.0.0\" }\n\n[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\nsecond = { version = \"0.1.0\", path = \"second\" }\n\n[target.'cfg(unix)'.dependencies]\nsecond-target = { package = \"second\", version = \"0.1.0\", path = \"second\" }\n";
+        let source = "[package]\nname = \"first\"\nversion = \"0.1.0\"\n\n[dependencies]\nalias = { package = \"second\", version = \"0.1.0\", path = \"../second\" }\nunrelated = { package = \"other\", version = \"3.0.0\" }\n\n[dev-dependencies]\nsecond-string = \"0.1.0\"\n\n[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\nsecond = { version = \"0.1.0\", path = \"second\" }\n\n[target]\ninvalid-configuration = \"not a table\"\n\n[target.'cfg(unix)'.dependencies]\nsecond-target = { package = \"second\", version = \"0.1.0\", path = \"second\" }\n";
         let mut document: DocumentMut = source.parse().unwrap();
         let current = Version::parse("0.1.0").unwrap();
         let target = Version::parse("0.2.0").unwrap();
@@ -474,12 +516,253 @@ mod tests {
             Some("3.0.0")
         );
         assert_eq!(
+            document["dev-dependencies"]["second-string"].as_str(),
+            Some("0.1.0")
+        );
+        assert_eq!(
             document["workspace"]["dependencies"]["second"]["version"].as_str(),
             Some("0.2.0")
         );
         assert_eq!(
             document["target"]["cfg(unix)"]["dependencies"]["second-target"]["version"].as_str(),
             Some("0.2.0")
+        );
+    }
+
+    #[test]
+    fn increments_and_sets_shared_workspace_versions_in_cargo_manifests() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        workspace(&project);
+        project.cargo_proxy(&mut environment, None);
+        let context = project.context();
+
+        assert_eq!(workspace_version(&context).unwrap(), "1.2.3");
+        assert_eq!(
+            increment(&context, Component::Patch).unwrap()["version"],
+            "1.2.4"
+        );
+        assert_eq!(
+            increment(&context, Component::Minor).unwrap()["version"],
+            "1.3.0"
+        );
+        assert_eq!(
+            increment(&context, Component::Major).unwrap()["version"],
+            "2.0.0"
+        );
+        assert_eq!(set(&context, "2.4.0").unwrap()["version"], "2.4.0");
+
+        let workspace_manifest = fs::read_to_string(project.root().join("Cargo.toml")).unwrap();
+        let dependency_manifest =
+            fs::read_to_string(project.root().join("bake/Cargo.toml")).unwrap();
+        assert!(workspace_manifest.contains("version = \"2.4.0\""));
+        assert!(workspace_manifest.contains("version = \"2.4.0\" }"));
+        assert!(dependency_manifest.contains("version = \"2.4.0\""));
+        assert!(project.cargo_arguments().contains("update --workspace"));
+    }
+
+    #[test]
+    fn rejects_non_increasing_versions_before_mutating_the_workspace() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        workspace(&project);
+        project.cargo_proxy(&mut environment, None);
+        let context = project.context();
+
+        for requested in ["1.2.3", "1.2.2", "1.2", "1.2.3-rc.1"] {
+            assert!(set(&context, requested).is_err(), "{requested}");
+        }
+        assert!(increment(&context, Component::Patch).is_ok());
+    }
+
+    #[test]
+    fn reports_a_failed_lockfile_update_after_changing_manifest_versions() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        workspace(&project);
+        project.cargo_proxy(&mut environment, Some("update"));
+
+        let error = increment(&project.context(), Component::Patch).unwrap_err();
+        assert!(error.to_string().contains("could not update Cargo.lock"));
+        assert!(
+            fs::read_to_string(project.root().join("Cargo.toml"))
+                .unwrap()
+                .contains("version = \"1.2.4\"")
+        );
+    }
+
+    #[test]
+    fn validates_manifest_update_inputs_and_dependency_forms() {
+        let current = Version::parse("1.2.3").unwrap();
+        let target = Version::parse("1.2.4").unwrap();
+
+        let mut absent_package: DocumentMut = "[workspace]\nmembers = []\n".parse().unwrap();
+        update_package_version(&mut absent_package, current, target).unwrap();
+        let mut missing_version: DocumentMut = "[package]\nname = \"fixture\"\n".parse().unwrap();
+        update_package_version(&mut missing_version, current, target).unwrap();
+        let mut mismatched: DocumentMut = "[package]\nversion = \"1.2.2\"\n".parse().unwrap();
+        assert!(update_package_version(&mut mismatched, current, target).is_err());
+
+        let mut no_workspace_version: DocumentMut = "[workspace]\nmembers = []\n".parse().unwrap();
+        update_workspace_version(&mut no_workspace_version, current, target).unwrap();
+        let mut wrong_workspace_version: DocumentMut = "[workspace.package]\nversion = \"1.2.2\"\n"
+            .parse()
+            .unwrap();
+        assert!(update_workspace_version(&mut wrong_workspace_version, current, target).is_err());
+
+        let source = "[dependencies.alias]\npackage = \"second\"\nversion = \"1.2.3\"\npath = \"second\"\n\n[dev-dependencies]\nsecond = { version = \"1.2.3\", path = \"second\" }\n\n[build-dependencies]\nsecond = { version = \"1.2.3\", path = \"second\" }\n";
+        let mut document: DocumentMut = source.parse().unwrap();
+        update_local_dependency_versions(&mut document, target, &HashSet::from(["second"]));
+        assert_eq!(
+            document["dependencies"]["alias"]["version"].as_str(),
+            Some("1.2.4")
+        );
+        assert_eq!(
+            document["dev-dependencies"]["second"]["version"].as_str(),
+            Some("1.2.4")
+        );
+        assert_eq!(
+            document["build-dependencies"]["second"]["version"].as_str(),
+            Some("1.2.4")
+        );
+    }
+
+    #[test]
+    fn reports_missing_manifest_files() {
+        let project = Project::new();
+        assert!(replace_file(&project.root().join("missing.toml"), "data").is_err());
+        assert!(replace_file(Path::new(""), "data").is_err());
+
+        let directory = project.root().join("manifest-directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(replace_file(&directory, "data").is_err());
+        assert!(directory.is_dir());
+    }
+
+    #[test]
+    fn rejects_a_non_increasing_target_even_when_called_internally() {
+        let project = Project::new();
+        let current = Version::parse("1.2.3").unwrap();
+        assert!(
+            set_workspace_version(
+                &project.context(),
+                &[package("fixture", "1.2.3")],
+                current,
+                current,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("must be greater")
+        );
+    }
+
+    #[test]
+    fn reports_workspace_metadata_errors_and_missing_manifest_fields() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        let failed = project.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata-denied >&2\nexit 4\n",
+        );
+        environment.set("CARGO", failed.as_os_str());
+        assert!(
+            workspace_manifests(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("metadata-denied")
+        );
+
+        for (metadata, expected) in [
+            ("not json", "could not parse Cargo metadata"),
+            (r#"{"packages":[]}"#, "workspace root"),
+            (r#"{"workspace_root":"/tmp"}"#, "packages array"),
+            (
+                r#"{"workspace_root":"/tmp","packages":[{}]}"#,
+                "no manifest path",
+            ),
+        ] {
+            fake_metadata(&project, &mut environment, metadata);
+            assert!(
+                workspace_manifests(&project.context())
+                    .unwrap_err()
+                    .to_string()
+                    .contains(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn discovers_workspace_manifests_using_cargo_from_path() {
+        let mut environment = Environment::new();
+        environment.remove("CARGO");
+        let project = Project::new();
+        workspace(&project);
+
+        let (_, manifests) = workspace_manifests(&project.context()).unwrap();
+
+        assert_eq!(manifests.len(), 4);
+        assert!(manifests.contains(&fs::canonicalize(project.root().join("Cargo.toml")).unwrap()));
+    }
+
+    #[test]
+    fn reports_manifest_read_parse_and_version_mismatch_errors() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        let workspace_root = project.root().to_string_lossy().into_owned();
+        let missing = serde_json::json!({"workspace_root": workspace_root, "packages": []});
+        fake_metadata(&project, &mut environment, &missing.to_string());
+        assert!(
+            set_workspace_version(
+                &project.context(),
+                &[package("fixture", "1.2.3")],
+                Version::parse("1.2.3").unwrap(),
+                Version::parse("1.2.4").unwrap(),
+            )
+            .is_err()
+        );
+
+        project.write("Cargo.toml", "this is not TOML = [\n");
+        assert!(
+            set_workspace_version(
+                &project.context(),
+                &[package("fixture", "1.2.3")],
+                Version::parse("1.2.3").unwrap(),
+                Version::parse("1.2.4").unwrap(),
+            )
+            .is_err()
+        );
+
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.2.2\"\nedition = \"2024\"\n",
+        );
+        let metadata = serde_json::json!({
+            "workspace_root": workspace_root,
+            "packages": [{"manifest_path": project.root().join("crates/alpha/Cargo.toml")}]
+        });
+        fake_metadata(&project, &mut environment, &metadata.to_string());
+        assert!(
+            set_workspace_version(
+                &project.context(),
+                &[WorkspacePackage {
+                    name: "alpha".to_owned(),
+                    version: "1.2.3".to_owned(),
+                    manifest_path: project
+                        .root()
+                        .join("crates/alpha/Cargo.toml")
+                        .display()
+                        .to_string(),
+                }],
+                Version::parse("1.2.3").unwrap(),
+                Version::parse("1.2.4").unwrap(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("package version is not the expected")
         );
     }
 }
