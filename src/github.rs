@@ -4,7 +4,7 @@
 use bake::{Context, Error, Result, Value};
 use serde_json::{Value as JsonValue, json};
 use std::io::Write;
-use std::process::Stdio;
+use std::process::{ChildStdin, Stdio};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Repository {
@@ -188,6 +188,7 @@ fn validate_reviewer_reference(value: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 pub(crate) struct ReviewerSet {
     pub configured: Vec<String>,
     pub resolved: Vec<String>,
@@ -455,10 +456,7 @@ fn upsert_ruleset(
         )));
     }
 
-    let mut payload = desired.clone();
-    if let Some(object) = payload.as_object_mut() {
-        object.remove("repository");
-    }
+    let payload = desired.clone();
     if let Some(existing) = matches.first() {
         let identifier = existing
             .get("id")
@@ -488,12 +486,7 @@ pub(crate) fn github_api(
         .spawn()
         .map_err(|error| Error::new(format!("could not start GitHub CLI `gh`: {error}")))?;
     if let Some(body) = body {
-        let contents = serde_json::to_vec(body)?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| Error::new("could not open GitHub CLI input"))?
-            .write_all(&contents)?;
+        write_api_input(child.stdin.take(), body)?;
     }
     let output = child.wait_with_output()?;
     if !output.status.success() {
@@ -509,9 +502,43 @@ pub(crate) fn github_api(
         .map_err(|error| Error::new(format!("could not parse GitHub API response: {error}")))
 }
 
+fn write_api_input(stdin: Option<ChildStdin>, body: &JsonValue) -> Result<()> {
+    let contents = serde_json::to_vec(body)?;
+    stdin
+        .ok_or_else(|| Error::new("could not open GitHub CLI input"))?
+        .write_all(&contents)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{Environment, Project};
+    use std::process::Command;
+
+    fn with_fake_gh(project: &Project, environment: &mut Environment, script: &str) {
+        project.executable("gh", script);
+        environment.prepend_path(&project.root().join("bin"));
+    }
+
+    fn initialize_origin(project: &Project, url: &str) {
+        assert!(
+            Command::new("git")
+                .current_dir(project.root())
+                .args(["init", "--quiet"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(project.root())
+                .args(["remote", "add", "origin", url])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
 
     #[test]
     fn defaults_to_the_generated_workflow_check() {
@@ -568,6 +595,37 @@ mod tests {
         );
         assert!(validate_setup("main", 1, &[], &[], Some(43_201), "crates-io").is_err());
         assert!(validate_setup("main", 1, &[], &[], None, "crates/io").is_err());
+        assert!(
+            validate_setup(
+                "main",
+                1,
+                &[],
+                &[
+                    "a".to_owned(),
+                    "b".to_owned(),
+                    "c".to_owned(),
+                    "d".to_owned(),
+                    "e".to_owned(),
+                    "f".to_owned(),
+                    "g".to_owned(),
+                ],
+                None,
+                "crates-io"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_setup(
+                "main",
+                1,
+                &[],
+                &["User:123".to_owned()],
+                Some(43_201),
+                "crates-io"
+            )
+            .is_err()
+        );
+        assert!(validate_setup("main", 1, &[], &["User:123".to_owned()], None, "").is_err());
     }
 
     #[test]
@@ -576,5 +634,550 @@ mod tests {
         assert_eq!(parse_reviewer("Team:456").unwrap(), ("Team", 456));
         assert!(parse_reviewer("user:123").is_err());
         assert!(parse_reviewer("Team:abc").is_err());
+        assert!(validate_reviewer_reference("bad org/team").is_err());
+        assert!(validate_reviewer_reference("socketry/bad/team").is_err());
+        assert!(validate_reviewer_reference("bad login").is_err());
+    }
+
+    #[test]
+    fn resolves_and_validates_github_repository_names() {
+        let _environment = Environment::new();
+        let project = Project::new();
+        let context = project.context();
+
+        let repository = Repository::resolve(&context, "socketry/example").unwrap();
+        assert_eq!(repository.full_name(), "socketry/example");
+        assert!(Repository::resolve(&context, "").is_err());
+        assert!(Repository::resolve(&context, "missing-slash").is_err());
+        assert!(Repository::resolve(&context, "socketry/nested/repository").is_err());
+        assert!(Repository::resolve(&context, "bad owner/example").is_err());
+        assert!(validate_branch("release/1.2.3").is_err());
+        assert!(validate_branch("main").is_ok());
+    }
+
+    #[test]
+    fn reads_supported_github_origin_url_forms() {
+        let _environment = Environment::new();
+        for url in [
+            "https://github.com/socketry/example.git",
+            "http://github.com/socketry/example",
+            "ssh://git@github.com/socketry/example.git",
+            "git@github.com:socketry/example.git",
+        ] {
+            let project = Project::new();
+            initialize_origin(&project, url);
+            assert_eq!(
+                Repository::from_origin(&project.context())
+                    .unwrap()
+                    .full_name(),
+                "socketry/example"
+            );
+        }
+    }
+
+    #[test]
+    fn reports_an_origin_command_failure_for_a_git_repository_without_origin() {
+        let _environment = Environment::new();
+        let project = Project::new();
+        assert!(
+            Command::new("git")
+                .current_dir(project.root())
+                .args(["init", "--quiet"])
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        assert!(
+            Repository::from_origin(&project.context())
+                .unwrap_err()
+                .to_string()
+                .contains("could not read the origin Git remote")
+        );
+    }
+
+    #[test]
+    fn rejects_non_github_and_malformed_origin_urls() {
+        let _environment = Environment::new();
+        for url in [
+            "https://example.com/socketry/example",
+            "https://github.com/socketry",
+            "https://github.com/socketry/nested/example",
+            "https://github.com/bad owner/example",
+        ] {
+            let project = Project::new();
+            initialize_origin(&project, url);
+            assert!(
+                Repository::from_origin(&project.context()).is_err(),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_user_and_team_reviewers_and_rejects_invalid_lookups() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$*\" in\n  'api --method GET users/ioquatix') printf '%s' '{\"id\":42}' ;;\n  'api --method GET orgs/Socketry/teams/managers') printf '%s' '{\"id\":99}' ;;\n  'api --method GET users/missing') printf '%s' '{}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        let resolved = resolve_reviewers(
+            &project.context(),
+            &repository,
+            &[
+                "User:7".to_owned(),
+                "ioquatix".to_owned(),
+                "Socketry/managers".to_owned(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(resolved.configured[0], "User:7");
+        assert_eq!(resolved.resolved, ["User:7", "User:42", "Team:99"]);
+        assert!(
+            resolve_reviewers(
+                &project.context(),
+                &repository,
+                &["other-org/managers".to_owned()]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("must belong to GitHub owner")
+        );
+        assert!(
+            resolve_reviewers(&project.context(), &repository, &["missing".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("no numeric ID")
+        );
+    }
+
+    #[test]
+    fn github_api_handles_json_empty_responses_and_errors() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$*\" in\n  'api --method GET json') printf '%s' '{\"ok\":true}' ;;\n  'api --method GET empty') : ;;\n  'api --method GET invalid') printf '{' ;;\n  'api --method GET failure') echo denied >&2; exit 4 ;;\n  'api --method PUT update --input -') cat >/dev/null; printf '%s' '{\"updated\":true}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let context = project.context();
+        assert_eq!(
+            github_api(&context, "GET", "json", None).unwrap()["ok"],
+            true
+        );
+        assert!(
+            github_api(&context, "GET", "empty", None)
+                .unwrap()
+                .is_null()
+        );
+        assert!(
+            github_api(&context, "GET", "invalid", None)
+                .unwrap_err()
+                .to_string()
+                .contains("could not parse GitHub API response")
+        );
+        assert!(
+            github_api(&context, "GET", "failure", None)
+                .unwrap_err()
+                .to_string()
+                .contains("denied")
+        );
+        assert_eq!(
+            github_api(&context, "PUT", "update", Some(&json!({"x": 1}))).unwrap()["updated"],
+            true
+        );
+    }
+
+    #[test]
+    fn github_api_reports_an_unavailable_cli() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        environment.set("PATH", project.root().as_os_str());
+        assert!(
+            github_api(&project.context(), "GET", "users/test", None)
+                .unwrap_err()
+                .to_string()
+                .contains("could not start GitHub CLI")
+        );
+    }
+
+    #[test]
+    fn reports_missing_github_cli_input() {
+        assert!(
+            write_api_input(None, &json!({}))
+                .unwrap_err()
+                .to_string()
+                .contains("could not open GitHub CLI input")
+        );
+    }
+
+    #[test]
+    fn preserves_existing_environment_protection_settings() {
+        let existing = json!({
+            "protection_rules": [
+                {"type": "wait_timer", "wait_timer": 15},
+                {"type": "required_reviewers", "prevent_self_review": true, "reviewers": [
+                    {"type": "Team", "reviewer": {"id": 42}},
+                    {"type": "User", "reviewer": {"id": 7}},
+                    {"type": "Team", "reviewer": {}}
+                ]}
+            ],
+            "deployment_branch_policy": {"protected_branches": true}
+        });
+        let payload = environment_payload(&[], None, Some(&existing));
+
+        assert_eq!(payload["wait_timer"], 15);
+        assert_eq!(payload["prevent_self_review"], true);
+        assert_eq!(
+            payload["reviewers"],
+            json!([
+                {"type": "Team", "id": 42},
+                {"type": "User", "id": 7}
+            ])
+        );
+        assert_eq!(
+            payload["deployment_branch_policy"]["protected_branches"],
+            true
+        );
+    }
+
+    #[test]
+    fn tolerates_existing_review_rules_with_incomplete_settings() {
+        let existing = json!({
+            "protection_rules": [{"type": "required_reviewers", "prevent_self_review": false}]
+        });
+        let payload = environment_payload(&[], None, Some(&existing));
+        assert_eq!(payload["prevent_self_review"], false);
+        assert!(payload.get("reviewers").is_none());
+    }
+
+    #[test]
+    fn preserves_existing_reviewers_when_self_review_setting_is_absent() {
+        let existing = json!({
+            "protection_rules": [{
+                "type": "required_reviewers",
+                "reviewers": [{"type": "User", "reviewer": {"id": 7}}]
+            }]
+        });
+        let payload = environment_payload(&[], None, Some(&existing));
+
+        assert!(payload.get("prevent_self_review").is_none());
+        assert_eq!(payload["reviewers"], json!([{"type": "User", "id": 7}]));
+    }
+
+    #[test]
+    fn preserves_existing_environment_without_a_reviewer_rule() {
+        let existing = json!({
+            "protection_rules": [{"type": "wait_timer", "wait_timer": 15}],
+            "deployment_branch_policy": {"protected_branches": true}
+        });
+        let payload = environment_payload(&[], None, Some(&existing));
+
+        assert_eq!(payload["wait_timer"], 15);
+        assert_eq!(
+            payload["deployment_branch_policy"]["protected_branches"],
+            true
+        );
+        assert!(payload.get("prevent_self_review").is_none());
+        assert!(payload.get("reviewers").is_none());
+    }
+
+    #[test]
+    fn explicit_environment_values_override_preserved_values() {
+        let existing = json!({
+            "protection_rules": [{"type": "wait_timer", "wait_timer": 15}],
+            "deployment_branch_policy": {"protected_branches": true}
+        });
+        let payload = environment_payload(&["Team:123".to_owned()], Some(30), Some(&existing));
+
+        assert_eq!(payload["wait_timer"], 30);
+        assert_eq!(payload["reviewers"][0]["id"], 123);
+        assert_eq!(
+            payload["deployment_branch_policy"]["protected_branches"],
+            true
+        );
+    }
+
+    #[test]
+    fn discovers_existing_environments_and_rejects_malformed_lists() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/example/environments?per_page=100') printf '%s' '{\"environments\":[{\"name\":\"crates-io\"}]}' ;;\n  'GET repos/socketry/example/environments/crates-io') printf '%s' '{\"name\":\"crates-io\"}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        assert_eq!(
+            existing_environment(&project.context(), &repository, "crates-io").unwrap(),
+            Some(json!({"name": "crates-io"}))
+        );
+
+        let malformed = Project::new();
+        with_fake_gh(
+            &malformed,
+            &mut environment,
+            "#!/bin/sh\nprintf '%s' '{\"environments\":null}'\n",
+        );
+        assert!(
+            existing_environment(&malformed.context(), &repository, "crates-io")
+                .unwrap_err()
+                .to_string()
+                .contains("invalid environments response")
+        );
+    }
+
+    #[test]
+    fn creates_and_updates_rulesets_by_their_managed_name() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/example/rulesets?per_page=100') printf '%s' '[]' ;;\n  'POST repos/socketry/example/rulesets') cat >/dev/null; printf '%s' '{\"id\":7}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        assert_eq!(
+            upsert_ruleset(
+                &project.context(),
+                &repository,
+                &branch_ruleset("main", 1, &[])
+            )
+            .unwrap(),
+            json!({"id": 7})
+        );
+
+        let existing = Project::new();
+        with_fake_gh(
+            &existing,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/example/rulesets?per_page=100') printf '%s' '[{\"name\":\"Socketry Cargo checks\",\"id\":42}]' ;;\n  'PUT repos/socketry/example/rulesets/42') cat >/dev/null; printf '%s' '{\"updated\":true}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        assert_eq!(
+            upsert_ruleset(
+                &existing.context(),
+                &repository,
+                &branch_ruleset("main", 1, &[])
+            )
+            .unwrap(),
+            json!({"updated": true})
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_missing_id_and_malformed_ruleset_responses() {
+        let mut environment = Environment::new();
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        assert!(
+            upsert_ruleset(&bake::Registry::new().context("."), &repository, &json!({}))
+                .unwrap_err()
+                .to_string()
+                .contains("managed ruleset has no name")
+        );
+        for (response, expected) in [
+            (
+                "[{\"name\":\"Socketry Cargo checks\",\"id\":42},{\"name\":\"Socketry Cargo checks\",\"id\":43}]",
+                "multiple GitHub rulesets",
+            ),
+            ("[{\"name\":\"Socketry Cargo checks\"}]", "no numeric ID"),
+            ("{}", "invalid rulesets response"),
+        ] {
+            let project = Project::new();
+            with_fake_gh(
+                &project,
+                &mut environment,
+                &format!("#!/bin/sh\nprintf '%s' '{response}'\n"),
+            );
+            assert!(
+                upsert_ruleset(
+                    &project.context(),
+                    &repository,
+                    &branch_ruleset("main", 1, &[])
+                )
+                .unwrap_err()
+                .to_string()
+                .contains(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn builds_setup_plan_and_preserves_requested_settings() {
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        let reviewers = ReviewerSet {
+            configured: vec!["socketry/managers".to_owned()],
+            resolved: vec!["Team:123".to_owned()],
+        };
+        let plan = setup_plan(
+            &repository,
+            "main",
+            2,
+            &["test".to_owned()],
+            &reviewers,
+            Some(10),
+            "crates-io",
+        );
+
+        assert_eq!(plan["repository"], "socketry/example");
+        assert_eq!(plan["reviewers"]["configured"][0], "socketry/managers");
+        assert_eq!(plan["environment"]["name"], "crates-io");
+        assert_eq!(plan["environment"]["wait_timer"], 10);
+        assert_eq!(
+            plan["branch_ruleset"]["rules"][0]["parameters"]["required_approving_review_count"],
+            2
+        );
+    }
+
+    #[test]
+    fn applies_rulesets_and_a_new_environment_without_hitting_github() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        project.write("crates/alpha/src/lib.rs", "// fixture\n");
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/example/environments?per_page=100') printf '%s' '{\"environments\":[]}' ;;\n  'GET repos/socketry/example/rulesets?per_page=100') printf '%s' '[]' ;;\n  'POST repos/socketry/example/rulesets') cat >/dev/null; printf '%s' '{\"created\":true}' ;;\n  'PUT repos/socketry/example/environments/crates-io') cat > requested-environment.json; printf '%s' '{\"name\":\"crates-io\"}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        let result = apply_setup(
+            &project.context(),
+            &repository,
+            "main",
+            1,
+            &["check".to_owned()],
+            &["User:123".to_owned()],
+            None,
+            "crates-io",
+        )
+        .unwrap();
+        assert_eq!(result["branch_ruleset"]["created"], true);
+        assert_eq!(result["tag_ruleset"]["created"], true);
+        let environment_body: JsonValue = serde_json::from_slice(
+            &std::fs::read(project.root().join("requested-environment.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(environment_body["reviewers"][0]["id"], 123);
+    }
+
+    #[test]
+    fn updates_existing_rulesets_and_preserves_environment_protection() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        project.write("crates/alpha/src/lib.rs", "// fixture\n");
+        with_fake_gh(
+            &project,
+            &mut environment,
+            "#!/bin/sh\ncase \"$3 $4\" in\n  'GET repos/socketry/example/environments?per_page=100') printf '%s' '{\"environments\":[{\"name\":\"crates-io\"}]}' ;;\n  'GET repos/socketry/example/environments/crates-io') printf '%s' '{\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":5},{\"type\":\"required_reviewers\",\"prevent_self_review\":true,\"reviewers\":[{\"type\":\"User\",\"reviewer\":{\"id\":77}}]}],\"deployment_branch_policy\":{\"protected_branches\":true}}' ;;\n  'GET repos/socketry/example/rulesets?per_page=100') printf '%s' '[{\"name\":\"Socketry Cargo checks\",\"id\":42},{\"name\":\"Socketry Cargo release tags\",\"id\":43}]' ;;\n  'PUT repos/socketry/example/rulesets/42'|'PUT repos/socketry/example/rulesets/43') cat >/dev/null; printf '%s' '{\"updated\":true}' ;;\n  'PUT repos/socketry/example/environments/crates-io') cat > requested-environment.json; printf '%s' '{}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+        apply_setup(
+            &project.context(),
+            &repository,
+            "main",
+            1,
+            &["check".to_owned()],
+            &[],
+            None,
+            "crates-io",
+        )
+        .unwrap();
+        let environment_body: JsonValue = serde_json::from_slice(
+            &std::fs::read(project.root().join("requested-environment.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(environment_body["wait_timer"], 5);
+        assert_eq!(environment_body["prevent_self_review"], true);
+        assert_eq!(environment_body["reviewers"][0]["id"], 77);
+        assert_eq!(
+            environment_body["deployment_branch_policy"]["protected_branches"],
+            true
+        );
+    }
+
+    #[test]
+    fn refuses_to_protect_a_workspace_with_no_publishable_packages() {
+        let _cargo_environment = Environment::new();
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = []\nresolver = \"3\"\n",
+        );
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+
+        assert!(
+            apply_setup(
+                &project.context(),
+                &repository,
+                "main",
+                1,
+                &["check".to_owned()],
+                &["User:123".to_owned()],
+                None,
+                "crates-io",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("no publishable packages")
+        );
+    }
+
+    #[test]
+    fn plans_ruleset_and_tag_protection_shapes() {
+        let branch = branch_ruleset("main", 0, &["test".to_owned()]);
+        assert_eq!(
+            branch["conditions"]["ref_name"]["include"][0],
+            "refs/heads/main"
+        );
+        assert_eq!(
+            branch["rules"][1]["parameters"]["required_status_checks"][0]["context"],
+            "test"
+        );
+        assert_eq!(
+            tag_ruleset()["conditions"]["ref_name"]["include"][0],
+            "refs/tags/v*"
+        );
     }
 }
