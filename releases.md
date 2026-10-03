@@ -1,7 +1,9 @@
 # Releases
 
-## Unreleased
+## v0.2.8
 
+- Move the shared Rust release process to `socketry-project` and remove the
+  duplicate publishing context from Bake Cargo.
 - Preserve repository-admin bypass for pull request merges when applying branch
   rulesets.
 

@@ -23,10 +23,11 @@ dependencies such as `bake`; generated context and skills are excluded locally
 through Git's `info/exclude` file and do not add rules to `.gitignore`.
 Shared Rust guidance lives in
 [Bake Agent Context](https://github.com/socketry/bake-agent-context-rust/blob/main/context/rust.md).
-This crate also publishes guidance in
-[`context/publishing.md`](context/publishing.md). Link Bake Agent Context in
-your private `bake/` package, directly or through `socketry-project`, then run
-`cargo bake --regenerate` to link its tasks and
+For the standard Socketry release process, use the
+[Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md).
+This Readme and each task's `--help` output document the Bake Cargo commands.
+Link Bake Agent Context in your private `bake/` package, directly or through
+`socketry-project`, then run `cargo bake --regenerate` to link its tasks and
 `cargo bake agent:context:install` to install guidance from dependencies.
 
 ## Inspect and package
@@ -194,6 +195,27 @@ GitHub Release explicitly. The setup task only manages its named repository
 rulesets, and GitHub may require repository or organization plan features for
 some settings.
 
+## Releases
+
+<!-- bake-readme:releases:start -->
+See [releases.md](releases.md) for the full release history.
+
+### v0.2.8
+
+- Move the shared Rust release process to `socketry-project` and remove the
+  duplicate publishing context from Bake Cargo.
+- Preserve repository-admin bypass for pull request merges when applying branch
+  rulesets.
+
+### v0.2.7
+
+- Use the pull request base commit when detecting release changes.
+
+### v0.2.6
+
+- Validate release headings from parsed Markdown in both Bake and the publishing workflow.
+<!-- bake-readme:releases:end -->
+
 ## Contributing
 
 Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-cargo-rust).
@@ -208,5 +230,6 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`,
 or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a
 pull request. After review and merge, GitHub Actions publishes the release
 when the configured `crates-io` environment approves it, then creates or updates
-the matching GitHub Release from `releases.md`. See the
-[Cargo publishing guide](https://github.com/socketry/bake-cargo-rust/blob/main/context/publishing.md).
+the matching GitHub Release from `releases.md`. Follow the shared
+[Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md)
+for the standard process.
