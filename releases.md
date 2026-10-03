@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.2.8
 
 - Preserve repository-admin bypass for pull request merges when applying branch
   rulesets.

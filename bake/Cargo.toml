@@ -7,4 +7,4 @@ publish = false
 [dependencies]
 socketry-project = "0.3"
 bake = "0.17.0"
-bake_cargo = { package = "bake-cargo", version = "0.2.7", path = ".." }
+bake_cargo = { package = "bake-cargo", version = "0.2.8", path = ".." }

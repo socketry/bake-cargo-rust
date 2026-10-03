@@ -21,10 +21,10 @@ optional `cargo:after_version_bump` task with the new version. Use that hook to
 update the license, release notes, Readme, or other project files;
 `socketry-project` provides the standard hook.
 
-Review the version and generated files, then run `cargo:release` to validate and
-package the release candidate. Commit the changes and open a pull request. The
-workflow checks formatting, Clippy, tests, package versions, and the matching
-`## vVERSION` heading in `releases.md`.
+Review and commit the version and generated files, then run `cargo:release` from
+the clean worktree to validate and package the release candidate. Open a pull
+request after it succeeds. The workflow checks formatting, Clippy, tests,
+package versions, and the matching `## vVERSION` heading in `releases.md`.
 
 ## Publish
 

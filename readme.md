@@ -68,10 +68,11 @@ release notes, and generated Readme sections.
 Review the changes made by the hook before committing the release.
 
 After updating the shared version and adding the matching release-notes heading,
-run `cargo:release` to validate and package the release candidate. It
-does not create a tag or publish anything. Commit the version, release notes,
-and any other release changes, then open a pull request for review. The merge to
-the configured branch is the release request.
+commit the version, release notes, and any other release changes. Then run
+`cargo:release` from the clean worktree to validate and package the release
+candidate. It does not create a tag or publish anything. Open a pull request for
+review after it succeeds. The merge to the configured branch is the release
+request.
 
 ## GitHub workflow and repository settings
 
@@ -193,6 +194,25 @@ commit changes or publish crates itself. The GitHub release task publishes a
 GitHub Release explicitly. The setup task only manages its named repository
 rulesets, and GitHub may require repository or organization plan features for
 some settings.
+
+## Releases
+
+<!-- bake-readme:releases:start -->
+See [releases.md](releases.md) for the full release history.
+
+### v0.2.8
+
+- Preserve repository-admin bypass for pull request merges when applying branch
+  rulesets.
+
+### v0.2.7
+
+- Use the pull request base commit when detecting release changes.
+
+### v0.2.6
+
+- Validate release headings from parsed Markdown in both Bake and the publishing workflow.
+<!-- bake-readme:releases:end -->
 
 ## Contributing
 
