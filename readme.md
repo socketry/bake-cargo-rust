@@ -106,7 +106,10 @@ For a single-package project without a workspace, use
 organization/team slugs; the setup task resolves them to GitHub IDs using the
 authenticated `gh` CLI. Cargo ignores this tool-specific metadata, and
 `cargo metadata` exposes it to Bake. An explicit `--reviewers` argument
-overrides the manifest value. Review the plan before applying it:
+overrides the manifest value. The branch ruleset permits repository admins to
+bypass branch requirements for pull request merges while still blocking direct
+pushes. Environment reviewer bypass is configured separately. Review the plan
+before applying it:
 
 ```sh
 cargo bake cargo:setup:github:plan \

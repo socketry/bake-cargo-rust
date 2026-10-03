@@ -72,9 +72,13 @@ For a single-package project without a workspace, use
 with `cargo bake cargo:setup:github:plan`, then apply them with
 `cargo bake cargo:setup:github:apply`. The tasks resolve reviewer names through
 the authenticated `gh` CLI. Applying settings requires permission to manage
-repository rulesets and environments. The setup permits the workflow initiator
-to approve their own deployment; GitHub administrators may bypass environment
-reviewers unless administrator bypass is disabled in GitHub settings.
+repository rulesets and environments. The branch ruleset allows repository
+administrators to bypass branch requirements when merging pull requests; this
+does not allow direct pushes to the protected branch. Environment reviewer
+requirements have a separate bypass setting in GitHub. The setup permits the
+workflow initiator to approve their own deployment; GitHub administrators may
+bypass environment reviewers unless administrator bypass is disabled in GitHub
+settings.
 
 For a package's first upload, `cargo bake cargo:bootstrap PACKAGE` publishes it
 with a crates.io owner token and registers its GitHub Actions trusted publisher.

@@ -285,13 +285,19 @@ fn branch_ruleset(branch: &str, approvals: u32, checks: &[String]) -> JsonValue 
     }));
     rules.push(json!({"type": "non_fast_forward"}));
 
+    // GitHub's repository role ID 5 is administrators. Restrict their bypass
+    // to pull requests so branch rules continue to block direct pushes.
     json!({
         "name": "Socketry Cargo checks",
         "target": "branch",
         "enforcement": "active",
         "conditions": {"ref_name": {"include": [format!("refs/heads/{branch}")], "exclude": []}},
         "rules": rules,
-        "bypass_actors": [],
+        "bypass_actors": [{
+            "actor_id": 5,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "pull_request",
+        }],
     })
 }
 
@@ -1174,6 +1180,14 @@ mod tests {
         assert_eq!(
             branch["rules"][1]["parameters"]["required_status_checks"][0]["context"],
             "test"
+        );
+        assert_eq!(
+            branch["bypass_actors"],
+            json!([{
+                "actor_id": 5,
+                "actor_type": "RepositoryRole",
+                "bypass_mode": "pull_request",
+            }])
         );
         assert_eq!(
             tag_ruleset()["conditions"]["ref_name"]["include"][0],
