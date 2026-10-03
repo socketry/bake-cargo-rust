@@ -1,5 +1,10 @@
 # Releases
 
+## Unreleased
+
+- Preserve repository-admin bypass for pull request merges when applying branch
+  rulesets.
+
 ## v0.2.7
 
 - Use the pull request base commit when detecting release changes.
