@@ -1,5 +1,10 @@
 # Releases
 
+## Unreleased
+
+- Remove the redundant `bake_cargo::cargo` module. Task functions are available
+  from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
+
 ## v0.2.10
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
