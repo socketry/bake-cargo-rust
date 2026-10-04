@@ -1,9 +1,9 @@
 # Bake Cargo
 
 `bake-cargo` provides reusable tasks for Cargo projects. Cargo operations register
-beneath `cargo`, and GitHub release creation registers beneath
-`releases:github`. Add the package to an unpublished `bake/` task binary and link
-it once:
+beneath `cargo`, including GitHub release creation at
+`cargo:releases:github:release`. Add the package to an unpublished `bake/` task
+binary and link it once:
 
 ```toml
 [dependencies]
@@ -204,6 +204,12 @@ some settings.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.2.9
+
+- Expose `cargo:releases:github:release` as the canonical GitHub release task
+  and retain `releases:github:release` as a temporary compatibility alias.
+  Both names work with existing Bake versions and crate-derived namespaces.
+
 ### v0.2.8
 
 - Move the shared Rust release process to `socketry-project` and remove the
@@ -214,10 +220,6 @@ See [releases.md](releases.md) for the full release history.
 ### v0.2.7
 
 - Use the pull request base commit when detecting release changes.
-
-### v0.2.6
-
-- Validate release headings from parsed Markdown in both Bake and the publishing workflow.
 <!-- bake-readme:releases:end -->
 
 ## Contributing

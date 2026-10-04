@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.2.9
 
 - Expose `cargo:releases:github:release` as the canonical GitHub release task
   and retain `releases:github:release` as a temporary compatibility alias.
