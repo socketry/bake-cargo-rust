@@ -204,6 +204,11 @@ some settings.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.3.0
+
+- Remove the redundant `bake_cargo::cargo` module. Task functions are available
+  from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
+
 ### v0.2.10
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
@@ -214,13 +219,6 @@ See [releases.md](releases.md) for the full release history.
 - Expose `cargo:releases:github:release` as the canonical GitHub release task
   and retain `releases:github:release` as a temporary compatibility alias.
   Both names work with existing Bake versions and crate-derived namespaces.
-
-### v0.2.8
-
-- Move the shared Rust release process to `socketry-project` and remove the
-  duplicate publishing context from Bake Cargo.
-- Preserve repository-admin bypass for pull request merges when applying branch
-  rulesets.
 <!-- bake-readme:releases:end -->
 
 ## Contributing

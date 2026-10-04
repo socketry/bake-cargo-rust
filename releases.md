@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.3.0
 
 - Remove the redundant `bake_cargo::cargo` module. Task functions are available
   from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
