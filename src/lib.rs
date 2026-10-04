@@ -13,6 +13,7 @@ mod github;
 mod release;
 #[path = "version.rs"]
 mod version_support;
+pub mod workflow;
 
 #[cfg(test)]
 mod test_support;

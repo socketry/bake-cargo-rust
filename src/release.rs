@@ -26,6 +26,12 @@ pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
             release_notes_path.display()
         )));
     }
+    bake_releases::extract_notes(&release_notes, &format!("v{version}")).map_err(|error| {
+        Error::new(format!(
+            "could not extract release notes from {}: {error}",
+            release_notes_path.display()
+        ))
+    })?;
 
     let mut package_arguments = vec!["package".to_owned(), "--locked".to_owned()];
     for package in &packages {
@@ -41,7 +47,7 @@ pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
     }))
 }
 
-fn contains_release_heading(release_notes: &str, version: &str) -> bool {
+pub(crate) fn contains_release_heading(release_notes: &str, version: &str) -> bool {
     contains_parsed_release_heading(to_mdast(release_notes, &ParseOptions::default()), version)
 }
 

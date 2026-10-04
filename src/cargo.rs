@@ -535,27 +535,20 @@ reviewers = ["Team:123"]
         assert!(workflow.contains("id: detect"));
         assert!(workflow.contains("github.event.pull_request.base.sha || github.event.before"));
         assert!(workflow.contains("cargo install socketry-cargo-bake --locked"));
-        assert!(workflow.contains("Verify release notes"));
-        assert!(workflow.contains("cargo bake --locked releases:notes"));
-        assert!(workflow.contains("releases.md must contain a '## v"));
+        assert!(workflow.contains("cargo bake --locked cargo:release:detect"));
+        assert!(workflow.contains("Validate release candidate"));
+        assert!(workflow.contains("cargo bake --locked cargo:release"));
         assert!(workflow.contains("environment: crates-io"));
         assert!(workflow.contains("contents: write"));
-        assert!(workflow.contains("Create release tag after successful publication"));
-        assert!(workflow.contains("Generate GitHub Release notes"));
-        assert!(workflow.contains("cargo bake releases:notes \"v${BAKE_VERSION}\""));
-        assert!(workflow.contains("Create or update GitHub Release"));
+        assert!(workflow.contains("Find workspace packages that need publishing"));
+        assert!(workflow.contains("cargo bake --locked cargo:publish:pending"));
+        assert!(workflow.contains("Publish workspace and create GitHub Release"));
+        assert!(workflow.contains("cargo bake --locked cargo:release:publish"));
         assert!(workflow.contains("GH_TOKEN: ${{ github.token }}"));
-        assert!(workflow.contains("gh\", \"release\", \"view\""));
-        assert!(workflow.contains("release.get(\"body\", \"\") == notes"));
-        assert!(workflow.contains("arguments.append(\"--draft=false\")"));
-        assert!(workflow.contains("release not found"));
-        assert!(workflow.contains("[\"git\", \"rev-list\", \"-n\", \"1\", f\"refs/tags/{tag}\"]"));
+        assert!(!workflow.contains("BAKE_RELEASE_NOTES"));
+        assert!(!workflow.contains("python3 - <<'PY'"));
         assert!(!workflow.contains("tags:\n      - \"v*\""));
-        assert!(workflow.contains("if any(item.get(\"num\") == os.environ[\"BAKE_VERSION\"]"));
-        assert!(workflow.contains("existing.append(name)"));
         assert!(workflow.contains("if: steps.packages.outputs.has_packages == 'true'"));
-        assert!(workflow.contains("[\"cargo\", \"publish\", \"--workspace\", \"--locked\"]"));
-        assert!(workflow.contains("--exclude"));
         assert!(workflow.contains(
             "BAKE_BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}"
         ));

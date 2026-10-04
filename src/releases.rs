@@ -197,17 +197,6 @@ pub mod github {
         }
     }
 
-    /// Temporary compatibility alias for `cargo:releases:github:release`.
-    #[bake::task(name = "releases:github:release")]
-    fn release_compatibility(
-        context: &mut Context,
-        tag: String,
-        #[bake(default = "releases.md")] path: PathBuf,
-        #[bake(default = false)] draft: bool,
-    ) -> Result<String> {
-        release(context, tag, path, draft)
-    }
-
     #[cfg(test)]
     mod tests {
         use super::{

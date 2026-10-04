@@ -40,6 +40,38 @@ struct ConfigurationResponse {
     github_config: TrustedPublisher,
 }
 
+#[derive(Debug, Deserialize)]
+struct CrateVersionsResponse {
+    #[serde(default)]
+    versions: Vec<CrateVersion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CrateVersion {
+    num: String,
+}
+
+pub(crate) fn version_is_published(package: &str, version: &str) -> Result<bool> {
+    validate_package_name(package)?;
+    let endpoint = format!("{}/crates/{package}/versions", api_base());
+    let response = match ureq::get(&endpoint)
+        .set("User-Agent", "socketry-bake-publish-workflow")
+        .call()
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => return Ok(false),
+        Err(error) => return Err(api_error("inspect published crate versions", error)),
+    };
+
+    let response: CrateVersionsResponse = response
+        .into_json()
+        .map_err(|error| Error::new(format!("could not decode crates.io response: {error}")))?;
+    Ok(response
+        .versions
+        .iter()
+        .any(|published| published.num == version))
+}
+
 pub(crate) fn trusted_publisher_plan(
     package: &str,
     repository: &Repository,

@@ -8,7 +8,7 @@ binary and link it once:
 ```toml
 [dependencies]
 bake = "0.17"
-bake-cargo = { version = "0.2" }
+bake-cargo = { version = "0.4" }
 ```
 
 ```rust,ignore
@@ -84,15 +84,17 @@ cargo bake cargo:setup:workflow
 
 It refuses to replace a different existing file. Use `--force true` only after
 reviewing the generated output. The workflow runs workspace checks on pull
-requests and branch updates. It compares the workspace version with the pull
-request base or previous branch commit, and requires a matching `## vVERSION`
-heading in `releases.md` for a version change. Ordinary commits do not publish.
-For a release change, it waits for approval from the `crates-io` environment
-reviewers, checks which workspace packages still need that version, exchanges a
-GitHub OIDC token for a short-lived crates.io token, and publishes them. It
-creates and pushes the annotated `vVERSION` tag only after every package upload
-succeeds. The workflow uses the GitHub environment `crates-io` and workflow file
-`publish.yml` by default.
+requests and branch updates. `cargo:release:detect` compares the workspace
+version with the pull request base or previous branch commit, validates the
+release heading, and reports whether a versioned release is ready. The
+`cargo:release` task packages the candidate on release changes. Ordinary
+commits do not publish. After merge, `cargo:publish:pending` checks which
+workspace packages still need that version; the workflow exchanges a GitHub
+OIDC token for a short-lived crates.io token only when uploads remain.
+`cargo:release:publish` publishes the remaining packages, creates and pushes
+the annotated `vVERSION` tag, and creates or updates the matching GitHub
+Release through `cargo:releases:github:release`. The workflow uses the GitHub
+environment `crates-io` and workflow file `publish.yml` by default.
 
 Plan repository protections before applying them. Store the desired reviewers
 in the project's Cargo metadata so the setup task can apply them:
@@ -188,10 +190,6 @@ cargo bake cargo:releases:github:release vX.Y.Z --draft true
 The task uses the authenticated `gh` CLI. Omit `--draft true` to publish the
 release immediately.
 
-`releases:github:release` remains available as a temporary compatibility alias
-with the same arguments and results. Update existing callers to
-`cargo:releases:github:release` before the alias is removed in a future release.
-
 The Cargo release integration supports crates.io and GitHub Actions. It edits
 Cargo package version fields and local dependency requirements, but does not
 commit changes or publish crates itself. The GitHub release task publishes a
@@ -204,6 +202,13 @@ some settings.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.0
+
+- Remove the temporary `releases:github:release` compatibility alias in favor
+  of `cargo:releases:github:release`.
+- Replace the inline publish workflow release scripts with standard Bake Cargo
+  tasks for detection, validation, publishing, tagging, and GitHub Release sync.
+
 ### v0.3.0
 
 - Remove the redundant `bake_cargo::cargo` module. Task functions are available
@@ -213,12 +218,6 @@ See [releases.md](releases.md) for the full release history.
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
   when upgrading to crate-derived task namespaces.
-
-### v0.2.9
-
-- Expose `cargo:releases:github:release` as the canonical GitHub release task
-  and retain `releases:github:release` as a temporary compatibility alias.
-  Both names work with existing Bake versions and crate-derived namespaces.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
