@@ -16,6 +16,13 @@ fn executable_lists_standard_project_tasks() {
     assert!(output.contains("cargo:after_version_bump"));
     assert!(output.contains("test:coverage"));
     assert!(output.contains("test:external"));
+    for name in ["cargo:releases:github:release", "releases:github:release"] {
+        assert!(
+            output
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some(name))
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -118,7 +125,7 @@ fn executable_runs_release_tasks_in_a_temporary_project() {
             let executable = bin.join("gh");
             fs::write(
                 &executable,
-                "#!/bin/sh\nif [ \"$1 $2\" = 'release view' ]; then\n  case \"$3\" in\n    v1.2.4) printf '%s' '{\"tagName\":\"v1.2.4\",\"name\":\"v1.2.4\",\"body\":\"Improvement.\",\"isDraft\":false,\"url\":\"https://github.com/socketry/fixture/releases/tag/v1.2.4\"}'; exit 0 ;;\n    v1.2.5) printf '%s' '{\"tagName\":\"v1.2.5\",\"name\":\"Old title\",\"body\":\"Old notes.\",\"isDraft\":false,\"url\":\"https://github.com/socketry/fixture/releases/tag/v1.2.5\"}'; exit 0 ;;\n  esac\n  echo 'release not found' >&2; exit 1\nfi\nif [ \"$1 $2\" = 'release create' ] || [ \"$1 $2\" = 'release edit' ]; then cat >/dev/null; echo \"https://github.com/socketry/fixture/releases/tag/$3\"; exit 0; fi\ncase \"$3 $4\" in\n  'GET users/alice') printf '%s' '{\"id\":42}' ;;\n  'GET repos/socketry/fixture/environments?per_page=100') printf '%s' '{\"environments\":[]}' ;;\n  'GET repos/socketry/fixture/rulesets?per_page=100') printf '%s' '[]' ;;\n  'POST repos/socketry/fixture/rulesets') cat >/dev/null; printf '%s' '{\"id\":7}' ;;\n  'PUT repos/socketry/fixture/environments/crates-io') cat >/dev/null; printf '%s' '{\"name\":\"crates-io\"}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+                "#!/bin/sh\nif [ \"$1 $2\" = 'release view' ]; then\n  case \"$3\" in\n    v1.2.4) printf '%s' '{\"tagName\":\"v1.2.4\",\"name\":\"v1.2.4\",\"body\":\"Improvement.\",\"isDraft\":false,\"url\":\"https://github.com/socketry/fixture/releases/tag/v1.2.4\"}'; exit 0 ;;\n    v1.2.5) printf '%s' '{\"tagName\":\"v1.2.5\",\"name\":\"Old title\",\"body\":\"Old notes.\",\"isDraft\":false,\"url\":\"https://github.com/socketry/fixture/releases/tag/v1.2.5\"}'; exit 0 ;;\n  esac\n  echo 'release not found' >&2; exit 1\nfi\nif [ \"$1 $2\" = 'release create' ] || [ \"$1 $2\" = 'release edit' ]; then printf '%s\\n' \"$@\" >gh-arguments.txt; cat >gh-notes.md; echo \"https://github.com/socketry/fixture/releases/tag/$3\"; exit 0; fi\ncase \"$3 $4\" in\n  'GET users/alice') printf '%s' '{\"id\":42}' ;;\n  'GET repos/socketry/fixture/environments?per_page=100') printf '%s' '{\"environments\":[]}' ;;\n  'GET repos/socketry/fixture/rulesets?per_page=100') printf '%s' '[]' ;;\n  'POST repos/socketry/fixture/rulesets') cat >/dev/null; printf '%s' '{\"id\":7}' ;;\n  'PUT repos/socketry/fixture/environments/crates-io') cat >/dev/null; printf '%s' '{\"name\":\"crates-io\"}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
             )
             .unwrap();
             fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
@@ -192,18 +199,50 @@ fn executable_runs_release_tasks_in_a_temporary_project() {
         project.run_with_fake_gh(&["cargo:setup:github:apply"]),
         "cargo:setup:github:apply",
     );
-    assert_success(
-        project.run_with_fake_gh(&["releases:github:release", "v1.2.3"]),
-        "releases:github:release",
-    );
-    assert_success(
-        project.run_with_fake_gh(&["releases:github:release", "v1.2.4"]),
-        "releases:github:release (unchanged)",
-    );
-    assert_success(
-        project.run_with_fake_gh(&["releases:github:release", "v1.2.5"]),
-        "releases:github:release (update)",
-    );
+    for task in ["cargo:releases:github:release", "releases:github:release"] {
+        for tag in ["v1.2.3", "v1.2.4", "v1.2.5"] {
+            let output = project.run_with_fake_gh(&[task, tag]);
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                format!("https://github.com/socketry/fixture/releases/tag/{tag}")
+            );
+            assert_success(output, task);
+        }
+
+        fs::write(
+            root.join("draft-notes.md"),
+            "# Releases\n\n## v2.0.0\n\nDraft notes.\n",
+        )
+        .unwrap();
+        assert_success(
+            project.run_with_fake_gh(&[
+                task,
+                "v2.0.0",
+                "--path",
+                "draft-notes.md",
+                "--draft",
+                "true",
+            ]),
+            task,
+        );
+        assert!(
+            fs::read_to_string(root.join("gh-arguments.txt"))
+                .unwrap()
+                .lines()
+                .any(|argument| argument == "--draft")
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("gh-notes.md")).unwrap().trim(),
+            "Draft notes."
+        );
+
+        let output = project.run(&[task, ""]);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("tag must be a nonempty GitHub release tag")
+        );
+    }
     assert!(
         !project
             .run(&["cargo:version:bump", "--version", "invalid"])

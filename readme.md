@@ -182,11 +182,15 @@ Create a GitHub Release from the notes under its matching heading after the
 release tag exists:
 
 ```sh
-cargo bake releases:github:release vX.Y.Z --draft true
+cargo bake cargo:releases:github:release vX.Y.Z --draft true
 ```
 
 The task uses the authenticated `gh` CLI. Omit `--draft true` to publish the
 release immediately.
+
+`releases:github:release` remains available as a temporary compatibility alias
+with the same arguments and results. Update existing callers to
+`cargo:releases:github:release` before the alias is removed in a future release.
 
 The Cargo release integration supports crates.io and GitHub Actions. It edits
 Cargo package version fields and local dependency requirements, but does not

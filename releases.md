@@ -1,5 +1,11 @@
 # Releases
 
+## Unreleased
+
+- Expose `cargo:releases:github:release` as the canonical GitHub release task
+  and retain `releases:github:release` as a temporary compatibility alias.
+  Both names work with existing Bake versions and crate-derived namespaces.
+
 ## v0.2.8
 
 - Move the shared Rust release process to `socketry-project` and remove the
