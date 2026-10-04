@@ -24,8 +24,8 @@ name = "bake_cargo"
 [dependencies]
 socketry-markdown = "0.1.0"
 bake = "0"
-bake-releases = "0.2.1"
-bake-license = "0.1.1"
+bake-releases = "0.3"
+bake-license = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ureq = { version = "2.12", features = ["json"] }
