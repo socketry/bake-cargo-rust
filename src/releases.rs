@@ -161,7 +161,8 @@ pub mod github {
 
     /// Create or update a GitHub Release from the matching release heading.
     /// The remote tag must already exist; use `--draft true` to create or update a draft.
-    #[bake::task]
+    // Keep the canonical name on Bake versions predating crate-name inference.
+    #[bake::task(name = "cargo:releases:github:release")]
     pub fn release(
         context: &mut Context,
         tag: String,
@@ -194,6 +195,17 @@ pub mod github {
                 existing_url(existing.as_ref())
             }
         }
+    }
+
+    /// Temporary compatibility alias for `cargo:releases:github:release`.
+    #[bake::task(name = "releases:github:release")]
+    fn release_compatibility(
+        context: &mut Context,
+        tag: String,
+        #[bake(default = "releases.md")] path: PathBuf,
+        #[bake(default = false)] draft: bool,
+    ) -> Result<String> {
+        release(context, tag, path, draft)
     }
 
     #[cfg(test)]
