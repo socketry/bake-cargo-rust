@@ -204,6 +204,11 @@ some settings.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.2.10
+
+- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
+  when upgrading to crate-derived task namespaces.
+
 ### v0.2.9
 
 - Expose `cargo:releases:github:release` as the canonical GitHub release task
@@ -216,10 +221,6 @@ See [releases.md](releases.md) for the full release history.
   duplicate publishing context from Bake Cargo.
 - Preserve repository-admin bypass for pull request merges when applying branch
   rulesets.
-
-### v0.2.7
-
-- Use the pull request base commit when detecting release changes.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
