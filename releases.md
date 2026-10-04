@@ -1,5 +1,10 @@
 # Releases
 
+## v0.2.10
+
+- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
+  when upgrading to crate-derived task namespaces.
+
 ## v0.2.9
 
 - Expose `cargo:releases:github:release` as the canonical GitHub release task
