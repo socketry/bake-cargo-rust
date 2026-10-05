@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.4.1
 
 - Treat a missing base Cargo manifest as the initial package release.
 
