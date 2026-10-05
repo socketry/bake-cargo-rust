@@ -1,38 +1,37 @@
 # Releases
 
+## v0.4.2
+
+- Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
+- Require the aggregate test and coverage result for pull request merges.
+- Require publishing checks and test results by default when configuring repository protections.
+- Update Bake usage examples and agent context guidance.
+
 ## v0.4.1
 
 - Treat a missing base Cargo manifest as the initial package release.
 
 ## v0.4.0
 
-- Remove the temporary `releases:github:release` compatibility alias in favor
-  of `cargo:releases:github:release`.
-- Replace the inline publish workflow release scripts with standard Bake Cargo
-  tasks for detection, validation, publishing, tagging, and GitHub Release sync.
+- Remove the temporary `releases:github:release` compatibility alias in favor of `cargo:releases:github:release`.
+- Replace the inline publish workflow release scripts with standard Bake Cargo tasks for detection, validation, publishing, tagging, and GitHub Release sync.
 
 ## v0.3.0
 
-- Remove the redundant `bake_cargo::cargo` module. Task functions are available
-  from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
+- Remove the redundant `bake_cargo::cargo` module. Task functions are available from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
 
 ## v0.2.10
 
-- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
-  when upgrading to crate-derived task namespaces.
+- Declare compatibility with the Bake 0.x API so task libraries can share one task registry when upgrading to crate-derived task namespaces.
 
 ## v0.2.9
 
-- Expose `cargo:releases:github:release` as the canonical GitHub release task
-  and retain `releases:github:release` as a temporary compatibility alias.
-  Both names work with existing Bake versions and crate-derived namespaces.
+- Expose `cargo:releases:github:release` as the canonical GitHub release task and retain `releases:github:release` as a temporary compatibility alias. Both names work with existing Bake versions and crate-derived namespaces.
 
 ## v0.2.8
 
-- Move the shared Rust release process to `socketry-project` and remove the
-  duplicate publishing context from Bake Cargo.
-- Preserve repository-admin bypass for pull request merges when applying branch
-  rulesets.
+- Move the shared Rust release process to `socketry-project` and remove the duplicate publishing context from Bake Cargo.
+- Preserve repository-admin bypass for pull request merges when applying branch rulesets.
 
 ## v0.2.7
 

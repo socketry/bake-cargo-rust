@@ -743,6 +743,10 @@ mod task_tests {
             plan["branch_ruleset"]["rules"][1]["parameters"]["required_status_checks"][0]["context"],
             "check"
         );
+        assert_eq!(
+            plan["branch_ruleset"]["rules"][1]["parameters"]["required_status_checks"][1]["context"],
+            "test-result"
+        );
 
         assert!(
             setup::github::plan(
