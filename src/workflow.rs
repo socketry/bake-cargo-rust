@@ -160,8 +160,9 @@ fn previous_versions(context: &Context, base: &str) -> Result<Option<String>> {
         .root()
         .canonicalize()
         .map_err(|error| Error::new(format!("could not resolve project root: {error}")))?;
-    let root_source = revision_file(context, base, Path::new("Cargo.toml"))?
-        .ok_or_else(|| Error::new("could not read the previous workspace Cargo.toml"))?;
+    let Some(root_source) = revision_file(context, base, Path::new("Cargo.toml"))? else {
+        return Ok(None);
+    };
     let root_document = parse_manifest(&root_source, "previous workspace Cargo.toml")?;
     let previous_workspace_version = root_document
         .get("workspace")
@@ -496,6 +497,28 @@ mod tests {
     }
 
     #[test]
+    fn detects_an_initial_release_when_the_base_has_no_cargo_manifest() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.write("README.md", "Initial project overview.\n");
+        prepare_workspace(&project, &mut environment);
+        let base = initialize_git(&project, false);
+
+        project.single_package("fixture", "1.2.3");
+        project.write("releases.md", "# Releases\n\n## v1.2.3\n\nRelease notes.\n");
+        let sha = commit(&project);
+        let output = set_release_output(&mut environment, &project);
+
+        let result = detect_release(&mut context(&project), base, sha).unwrap();
+
+        assert_eq!(result, json!({"release": true, "version": "1.2.3"}));
+        assert_eq!(
+            fs::read_to_string(output).unwrap(),
+            "release=true\nversion=1.2.3\n"
+        );
+    }
+
+    #[test]
     fn skips_an_unchanged_release_and_allows_missing_github_output() {
         let mut environment = Environment::new();
         environment.remove("GITHUB_OUTPUT");
@@ -710,12 +733,7 @@ mod tests {
         prepare_workspace(&project, &mut environment);
         let base = initialize_git(&project, false);
         project.single_package("fixture", "1.2.3");
-        assert!(
-            previous_versions(&context(&project), &base)
-                .unwrap_err()
-                .to_string()
-                .contains("could not read ")
-        );
+        assert_eq!(previous_versions(&context(&project), &base).unwrap(), None);
 
         let missing_project = Project::new();
         fs::remove_dir_all(missing_project.root()).unwrap();

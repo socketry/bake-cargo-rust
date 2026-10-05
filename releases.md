@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Treat a missing base Cargo manifest as the initial package release.
+
 ## v0.4.0
 
 - Remove the temporary `releases:github:release` compatibility alias in favor
