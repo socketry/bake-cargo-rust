@@ -69,10 +69,10 @@ release notes, and generated Readme sections.
 Review the changes made by the hook before committing the release.
 
 After updating the shared version and adding the matching release-notes heading,
-run `cargo:release` to validate and package the release candidate. It
-does not create a tag or publish anything. Commit the version, release notes,
-and any other release changes, then open a pull request for review. The merge to
-the configured branch is the release request.
+commit the version, release notes, and any other release changes. Then run
+`cargo:release` to validate and package the committed release candidate. It
+does not create a tag or publish anything. Open a pull request for review; the
+merge to the configured branch is the release request.
 
 ## GitHub workflow and repository settings
 
@@ -213,6 +213,10 @@ some settings.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.1
+
+- Treat a missing base Cargo manifest as the initial package release.
+
 ### v0.4.0
 
 - Remove the temporary `releases:github:release` compatibility alias in favor
@@ -224,11 +228,6 @@ See [releases.md](releases.md) for the full release history.
 
 - Remove the redundant `bake_cargo::cargo` module. Task functions are available
   from the crate root and semantic modules; registered `cargo:*` names remain unchanged.
-
-### v0.2.10
-
-- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
-  when upgrading to crate-derived task namespaces.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
