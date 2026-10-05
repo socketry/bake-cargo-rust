@@ -21,6 +21,17 @@ fn executable_lists_standard_project_tasks() {
             .lines()
             .any(|line| line.split_whitespace().next() == Some("cargo:releases:github:release"))
     );
+    for task in [
+        "cargo:release:detect",
+        "cargo:publish:pending",
+        "cargo:release:publish",
+    ] {
+        assert!(
+            output
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some(task))
+        );
+    }
     assert!(
         !output
             .lines()
@@ -164,6 +175,25 @@ fn executable_runs_release_tasks_in_a_temporary_project() {
 
     let project = Project::new();
     let root: &Path = &project.0;
+
+    assert!(
+        !project
+            .run(&["cargo:release:detect", "--base", "000000", "--sha", ""])
+            .status
+            .success()
+    );
+    assert!(
+        !project
+            .run(&["cargo:publish:pending", "--version", "invalid"])
+            .status
+            .success()
+    );
+    assert!(
+        !project
+            .run(&["cargo:release:publish", "--version", "0.1.0", "--sha", ""])
+            .status
+            .success()
+    );
 
     assert_success(project.run(&["cargo:packages"]), "cargo:packages");
     assert_success(project.run(&["cargo:release"]), "cargo:release");

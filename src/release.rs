@@ -147,6 +147,28 @@ mod tests {
     }
 
     #[test]
+    fn rejects_ambiguous_release_notes_before_packaging() {
+        use crate::test_support::{Environment, Project};
+
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        project.write(
+            "releases.md",
+            "## v1.2.3\n\nFirst entry.\n\n## v1.2.3\n\nDuplicate entry.\n",
+        );
+        project.cargo_proxy(&mut environment, None);
+
+        assert!(
+            prepare(&project.context(), "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous")
+        );
+        assert!(!project.cargo_arguments().contains("package --locked"));
+    }
+
+    #[test]
     fn rejects_empty_workspaces_missing_notes_and_failed_packaging() {
         use crate::test_support::{Environment, Project};
 

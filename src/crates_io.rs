@@ -349,6 +349,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn checks_crates_io_versions_for_an_exact_match() {
+        let mut environment = Environment::new();
+        let (api, server) = mock_server(vec![
+            (200, r#"{"versions":[{"num":"1.2.3"},{"num":"1.2.2"}]}"#),
+            (200, r#"{"versions":[{"num":"1.2.2"}]}"#),
+            (200, "{}"),
+        ]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+
+        assert!(version_is_published("fixture", "1.2.3").unwrap());
+        assert!(!version_is_published("fixture", "1.2.3").unwrap());
+        assert!(!version_is_published("fixture", "1.2.3").unwrap());
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn treats_missing_crates_as_unpublished_and_reports_registry_errors() {
+        let mut environment = Environment::new();
+        assert!(version_is_published("bad/name", "1.2.3").is_err());
+
+        let (api, server) = mock_server(vec![(404, "crate not found")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(!version_is_published("missing", "1.2.3").unwrap());
+        server.join().unwrap();
+
+        let (api, server) = mock_server(vec![(403, "registry denied")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(
+            version_is_published("fixture", "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("HTTP 403: registry denied")
+        );
+        server.join().unwrap();
+
+        let (api, server) = mock_server(vec![(200, "not json")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(
+            version_is_published("fixture", "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("could not decode crates.io response")
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     fn validates_trusted_publisher_inputs() {
         assert!(validate_configuration("socketry-crate", "publish.yml", "crates-io").is_ok());
         assert!(
