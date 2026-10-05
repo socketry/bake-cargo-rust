@@ -416,6 +416,22 @@ pub(crate) mod tests {
         assert!(validate_package_name("bad/name").is_err());
         assert!(validate_package_name("").is_err());
         assert!(validate_package_name("okay_name-1").is_ok());
+
+        let repository = repository("socketry", "example");
+        assert!(trusted_publisher_plan("fixture", &repository, "bad.txt", "").is_err());
+        assert!(validate_trusted_publisher_inputs("fixture", "bad.txt", "").is_err());
+        assert!(
+            configure_trusted_publisher_at(
+                "fixture",
+                &repository,
+                "bad.txt",
+                "",
+                "http://127.0.0.1"
+            )
+            .is_err()
+        );
+        assert!(set_trusted_publishing_only_at("", true, "http://127.0.0.1").is_err());
+        assert!(list_trusted_publishers("token", "", "http://127.0.0.1").is_err());
     }
 
     #[test]

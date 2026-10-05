@@ -88,10 +88,9 @@ fn version_overflow() -> Error {
     Error::new("version component is too large to increment")
 }
 
-pub(crate) fn workspace_version(context: &Context) -> Result<String> {
+pub(crate) fn workspace_version(context: &Context) -> Result<Version> {
     let packages = workspace_packages(context)?;
-    let version = shared_version(&packages)?;
-    Ok(version.to_string())
+    shared_version(&packages)
 }
 
 pub(crate) fn increment(context: &Context, component: Component) -> Result<Value> {
@@ -136,6 +135,16 @@ fn set_workspace_version(
     current: Version,
     target: Version,
 ) -> Result<Value> {
+    set_workspace_version_using(context, packages, current, target, replace_file)
+}
+
+fn set_workspace_version_using(
+    context: &Context,
+    packages: &[WorkspacePackage],
+    current: Version,
+    target: Version,
+    mut replace: impl FnMut(&Path, &str) -> Result<()>,
+) -> Result<Value> {
     if target <= current {
         return Err(Error::new(format!(
             "new version {target} must be greater than the current workspace version {current}"
@@ -170,7 +179,7 @@ fn set_workspace_version(
     }
 
     for (path, contents) in &updated {
-        replace_file(path, contents)?;
+        replace(path, contents)?;
     }
 
     crate::cargo_support::run_cargo(context, ["update", "--workspace"]).map_err(|error| {
@@ -345,13 +354,42 @@ fn replace_file(path: &Path, contents: &str) -> Result<()> {
         .parent()
         .ok_or_else(|| Error::new(format!("{} has no parent directory", path.display())))?;
     let permissions = fs::metadata(path)?.permissions();
-    let mut temporary = NamedTempFile::new_in(parent)?;
+    let temporary = NamedTempFile::new_in(parent)?;
+    replace_temporary_file(path, contents, permissions, temporary)
+}
+
+trait TemporaryReplacementFile: Write + Sized {
+    fn set_permissions(&self, permissions: fs::Permissions) -> std::io::Result<()>;
+    fn sync_all(&self) -> std::io::Result<()>;
+    fn persist(self, path: &Path) -> std::io::Result<()>;
+}
+
+impl TemporaryReplacementFile for NamedTempFile {
+    fn set_permissions(&self, permissions: fs::Permissions) -> std::io::Result<()> {
+        self.as_file().set_permissions(permissions)
+    }
+
+    fn sync_all(&self) -> std::io::Result<()> {
+        self.as_file().sync_all()
+    }
+
+    fn persist(self, path: &Path) -> std::io::Result<()> {
+        NamedTempFile::persist(self, path)
+            .map(|_| ())
+            .map_err(|error| error.error)
+    }
+}
+
+fn replace_temporary_file<T: TemporaryReplacementFile>(
+    path: &Path,
+    contents: &str,
+    permissions: fs::Permissions,
+    mut temporary: T,
+) -> Result<()> {
     temporary.write_all(contents.as_bytes())?;
-    temporary.as_file().set_permissions(permissions)?;
-    temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .map_err(|error| Error::from(error.error))?;
+    temporary.set_permissions(permissions)?;
+    temporary.sync_all()?;
+    temporary.persist(path)?;
     Ok(())
 }
 
@@ -465,6 +503,42 @@ mod tests {
         assert_eq!(shared_version(&packages).unwrap().to_string(), "1.2.3");
         assert!(shared_version(&[package("first", "1.2.3"), package("second", "1.2.4")]).is_err());
         assert!(shared_version(&[]).is_err());
+        assert!(shared_version(&[package("first", "invalid")]).is_err());
+        assert!(
+            shared_version(&[package("first", "1.2.3"), package("second", "invalid")]).is_err()
+        );
+    }
+
+    #[test]
+    fn propagates_workspace_version_metadata_and_increment_errors() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        let root = project.root().to_string_lossy().into_owned();
+        let invalid = serde_json::json!({
+            "workspace_root": root,
+            "packages": [{
+                "name": "fixture",
+                "version": "invalid",
+                "manifest_path": project.root().join("Cargo.toml")
+            }]
+        });
+        fake_metadata(&project, &mut environment, &invalid.to_string());
+        assert!(workspace_version(&project.context()).is_err());
+
+        let largest = serde_json::json!({
+            "packages": [{
+                "name": "fixture",
+                "version": "0.0.18446744073709551615",
+                "manifest_path": project.root().join("Cargo.toml")
+            }]
+        });
+        fake_metadata(&project, &mut environment, &largest.to_string());
+        assert!(
+            increment(&project.context(), Component::Patch)
+                .unwrap_err()
+                .to_string()
+                .contains("too large to increment")
+        );
     }
 
     #[test]
@@ -537,7 +611,7 @@ mod tests {
         project.cargo_proxy(&mut environment, None);
         let context = project.context();
 
-        assert_eq!(workspace_version(&context).unwrap(), "1.2.3");
+        assert_eq!(workspace_version(&context).unwrap().to_string(), "1.2.3");
         assert_eq!(
             increment(&context, Component::Patch).unwrap()["version"],
             "1.2.4"
@@ -640,6 +714,104 @@ mod tests {
     }
 
     #[test]
+    fn propagates_temporary_manifest_replacement_failures() {
+        #[derive(Clone, Copy)]
+        enum Failure {
+            Write,
+            Permissions,
+            Sync,
+            Persist,
+            Pass,
+        }
+
+        struct FailingFile(Failure);
+
+        impl Write for FailingFile {
+            fn write(&mut self, contents: &[u8]) -> std::io::Result<usize> {
+                if matches!(self.0, Failure::Write) {
+                    Err(std::io::Error::other("injected write failure"))
+                } else {
+                    Ok(contents.len())
+                }
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl TemporaryReplacementFile for FailingFile {
+            fn set_permissions(&self, _permissions: fs::Permissions) -> std::io::Result<()> {
+                if matches!(self.0, Failure::Permissions) {
+                    Err(std::io::Error::other("injected permissions failure"))
+                } else {
+                    Ok(())
+                }
+            }
+
+            fn sync_all(&self) -> std::io::Result<()> {
+                if matches!(self.0, Failure::Sync) {
+                    Err(std::io::Error::other("injected sync failure"))
+                } else {
+                    Ok(())
+                }
+            }
+
+            fn persist(self, _path: &Path) -> std::io::Result<()> {
+                if matches!(self.0, Failure::Persist) {
+                    Err(std::io::Error::other("injected persist failure"))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let permissions = fs::metadata(std::env::temp_dir()).unwrap().permissions();
+        for (failure, expected) in [
+            (Failure::Write, "write"),
+            (Failure::Permissions, "permissions"),
+            (Failure::Sync, "sync"),
+            (Failure::Persist, "persist"),
+        ] {
+            assert!(
+                replace_temporary_file(
+                    Path::new("unused"),
+                    "contents",
+                    permissions.clone(),
+                    FailingFile(failure),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains(expected)
+            );
+        }
+        let mut passing_file = FailingFile(Failure::Pass);
+        passing_file.flush().unwrap();
+        assert!(
+            replace_temporary_file(Path::new("unused"), "contents", permissions, passing_file,)
+                .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_a_temporary_file_creation_failure_in_a_read_only_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let project = Project::new();
+        let path = project.write("Cargo.toml", "[package]\nversion = \"1.2.3\"\n");
+        let mut permissions = fs::metadata(project.root()).unwrap().permissions();
+        permissions.set_mode(0o500);
+        fs::set_permissions(project.root(), permissions).unwrap();
+        let result = replace_file(&path, "updated");
+        let mut permissions = fs::metadata(project.root()).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(project.root(), permissions).unwrap();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn rejects_a_non_increasing_target_even_when_called_internally() {
         let project = Project::new();
         let current = Version::parse("1.2.3").unwrap();
@@ -671,6 +843,10 @@ mod tests {
                 .to_string()
                 .contains("metadata-denied")
         );
+
+        let missing_cargo = project.root().join("missing-cargo");
+        environment.set("CARGO", missing_cargo.as_os_str());
+        assert!(workspace_manifests(&project.context()).is_err());
 
         for (metadata, expected) in [
             ("not json", "could not parse Cargo metadata"),
@@ -709,6 +885,17 @@ mod tests {
         let mut environment = Environment::new();
         let project = Project::new();
         let workspace_root = project.root().to_string_lossy().into_owned();
+
+        let no_workspace_root = serde_json::json!({
+            "packages": [{
+                "name": "fixture",
+                "version": "1.2.3",
+                "manifest_path": project.root().join("Cargo.toml")
+            }]
+        });
+        fake_metadata(&project, &mut environment, &no_workspace_root.to_string());
+        assert!(set(&project.context(), "1.2.4").is_err());
+
         let missing = serde_json::json!({"workspace_root": workspace_root, "packages": []});
         fake_metadata(&project, &mut environment, &missing.to_string());
         assert!(
@@ -763,6 +950,51 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("package version is not the expected")
+        );
+    }
+
+    #[test]
+    fn propagates_workspace_and_manifest_replacement_errors() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        workspace(&project);
+        let workspace_root = project.root().to_string_lossy().into_owned();
+        let metadata = serde_json::json!({
+            "workspace_root": workspace_root,
+            "packages": [
+                {"name": "alpha", "version": "1.2.3", "manifest_path": project.root().join("crates/alpha/Cargo.toml")},
+                {"name": "beta", "version": "1.2.3", "manifest_path": project.root().join("crates/beta/Cargo.toml")}
+            ]
+        });
+        fake_metadata(&project, &mut environment, &metadata.to_string());
+
+        let packages = [package("alpha", "1.2.3"), package("beta", "1.2.3")];
+        assert!(
+            set_workspace_version_using(
+                &project.context(),
+                &packages,
+                Version::parse("1.2.3").unwrap(),
+                Version::parse("1.2.4").unwrap(),
+                |_, _| Err(Error::new("injected replacement failure")),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("injected replacement failure")
+        );
+
+        let mut root = fs::read_to_string(project.root().join("Cargo.toml")).unwrap();
+        root = root.replace("version = \"1.2.3\"", "version = \"9.9.9\"");
+        project.write("Cargo.toml", &root);
+        assert!(
+            set_workspace_version(
+                &project.context(),
+                &packages,
+                Version::parse("1.2.3").unwrap(),
+                Version::parse("1.2.4").unwrap(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("workspace.package].version")
         );
     }
 }
