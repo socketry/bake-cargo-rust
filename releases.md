@@ -1,5 +1,12 @@
 # Releases
 
+## v0.4.0
+
+- Remove the temporary `releases:github:release` compatibility alias in favor
+  of `cargo:releases:github:release`.
+- Replace the inline publish workflow release scripts with standard Bake Cargo
+  tasks for detection, validation, publishing, tagging, and GitHub Release sync.
+
 ## v0.3.0
 
 - Remove the redundant `bake_cargo::cargo` module. Task functions are available

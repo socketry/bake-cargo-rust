@@ -26,6 +26,12 @@ pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
             release_notes_path.display()
         )));
     }
+    bake_releases::extract_notes(&release_notes, &format!("v{version}")).map_err(|error| {
+        Error::new(format!(
+            "could not extract release notes from {}: {error}",
+            release_notes_path.display()
+        ))
+    })?;
 
     let mut package_arguments = vec!["package".to_owned(), "--locked".to_owned()];
     for package in &packages {
@@ -41,7 +47,7 @@ pub(crate) fn prepare(context: &Context, version: &str) -> Result<Value> {
     }))
 }
 
-fn contains_release_heading(release_notes: &str, version: &str) -> bool {
+pub(crate) fn contains_release_heading(release_notes: &str, version: &str) -> bool {
     contains_parsed_release_heading(to_mdast(release_notes, &ParseOptions::default()), version)
 }
 
@@ -138,6 +144,28 @@ mod tests {
                 .cargo_arguments()
                 .contains("package --locked --package fixture")
         );
+    }
+
+    #[test]
+    fn rejects_ambiguous_release_notes_before_packaging() {
+        use crate::test_support::{Environment, Project};
+
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        project.write(
+            "releases.md",
+            "## v1.2.3\n\nFirst entry.\n\n## v1.2.3\n\nDuplicate entry.\n",
+        );
+        project.cargo_proxy(&mut environment, None);
+
+        assert!(
+            prepare(&project.context(), "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous")
+        );
+        assert!(!project.cargo_arguments().contains("package --locked"));
     }
 
     #[test]

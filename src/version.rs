@@ -20,14 +20,14 @@ pub(crate) enum Component {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct Version {
+pub(crate) struct Version {
     major: u64,
     minor: u64,
     patch: u64,
 }
 
 impl Version {
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         let components: Vec<_> = value.split('.').collect();
         if components.len() != 3 {
             return Err(Error::new(format!(

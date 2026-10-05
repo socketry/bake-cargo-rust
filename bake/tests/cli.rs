@@ -16,13 +16,27 @@ fn executable_lists_standard_project_tasks() {
     assert!(output.contains("cargo:after_version_bump"));
     assert!(output.contains("test:coverage"));
     assert!(output.contains("test:external"));
-    for name in ["cargo:releases:github:release", "releases:github:release"] {
+    assert!(
+        output
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("cargo:releases:github:release"))
+    );
+    for task in [
+        "cargo:release:detect",
+        "cargo:publish:pending",
+        "cargo:release:publish",
+    ] {
         assert!(
             output
                 .lines()
-                .any(|line| line.split_whitespace().next() == Some(name))
+                .any(|line| line.split_whitespace().next() == Some(task))
         );
     }
+    assert!(
+        !output
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("releases:github:release"))
+    );
 }
 
 #[cfg(unix)]
@@ -162,6 +176,25 @@ fn executable_runs_release_tasks_in_a_temporary_project() {
     let project = Project::new();
     let root: &Path = &project.0;
 
+    assert!(
+        !project
+            .run(&["cargo:release:detect", "--base", "000000", "--sha", ""])
+            .status
+            .success()
+    );
+    assert!(
+        !project
+            .run(&["cargo:publish:pending", "--version", "invalid"])
+            .status
+            .success()
+    );
+    assert!(
+        !project
+            .run(&["cargo:release:publish", "--version", "0.1.0", "--sha", ""])
+            .status
+            .success()
+    );
+
     assert_success(project.run(&["cargo:packages"]), "cargo:packages");
     assert_success(project.run(&["cargo:release"]), "cargo:release");
     assert_success(
@@ -199,50 +232,49 @@ fn executable_runs_release_tasks_in_a_temporary_project() {
         project.run_with_fake_gh(&["cargo:setup:github:apply"]),
         "cargo:setup:github:apply",
     );
-    for task in ["cargo:releases:github:release", "releases:github:release"] {
-        for tag in ["v1.2.3", "v1.2.4", "v1.2.5"] {
-            let output = project.run_with_fake_gh(&[task, tag]);
-            assert_eq!(
-                String::from_utf8_lossy(&output.stdout).trim(),
-                format!("https://github.com/socketry/fixture/releases/tag/{tag}")
-            );
-            assert_success(output, task);
-        }
-
-        fs::write(
-            root.join("draft-notes.md"),
-            "# Releases\n\n## v2.0.0\n\nDraft notes.\n",
-        )
-        .unwrap();
-        assert_success(
-            project.run_with_fake_gh(&[
-                task,
-                "v2.0.0",
-                "--path",
-                "draft-notes.md",
-                "--draft",
-                "true",
-            ]),
-            task,
-        );
-        assert!(
-            fs::read_to_string(root.join("gh-arguments.txt"))
-                .unwrap()
-                .lines()
-                .any(|argument| argument == "--draft")
-        );
+    let task = "cargo:releases:github:release";
+    for tag in ["v1.2.3", "v1.2.4", "v1.2.5"] {
+        let output = project.run_with_fake_gh(&[task, tag]);
         assert_eq!(
-            fs::read_to_string(root.join("gh-notes.md")).unwrap().trim(),
-            "Draft notes."
+            String::from_utf8_lossy(&output.stdout).trim(),
+            format!("https://github.com/socketry/fixture/releases/tag/{tag}")
         );
-
-        let output = project.run(&[task, ""]);
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("tag must be a nonempty GitHub release tag")
-        );
+        assert_success(output, task);
     }
+
+    fs::write(
+        root.join("draft-notes.md"),
+        "# Releases\n\n## v2.0.0\n\nDraft notes.\n",
+    )
+    .unwrap();
+    assert_success(
+        project.run_with_fake_gh(&[
+            task,
+            "v2.0.0",
+            "--path",
+            "draft-notes.md",
+            "--draft",
+            "true",
+        ]),
+        task,
+    );
+    assert!(
+        fs::read_to_string(root.join("gh-arguments.txt"))
+            .unwrap()
+            .lines()
+            .any(|argument| argument == "--draft")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("gh-notes.md")).unwrap().trim(),
+        "Draft notes."
+    );
+
+    let output = project.run(&[task, ""]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("tag must be a nonempty GitHub release tag")
+    );
     assert!(
         !project
             .run(&["cargo:version:bump", "--version", "invalid"])

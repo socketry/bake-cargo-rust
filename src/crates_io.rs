@@ -40,6 +40,38 @@ struct ConfigurationResponse {
     github_config: TrustedPublisher,
 }
 
+#[derive(Debug, Deserialize)]
+struct CrateVersionsResponse {
+    #[serde(default)]
+    versions: Vec<CrateVersion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CrateVersion {
+    num: String,
+}
+
+pub(crate) fn version_is_published(package: &str, version: &str) -> Result<bool> {
+    validate_package_name(package)?;
+    let endpoint = format!("{}/crates/{package}/versions", api_base());
+    let response = match ureq::get(&endpoint)
+        .set("User-Agent", "socketry-bake-publish-workflow")
+        .call()
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => return Ok(false),
+        Err(error) => return Err(api_error("inspect published crate versions", error)),
+    };
+
+    let response: CrateVersionsResponse = response
+        .into_json()
+        .map_err(|error| Error::new(format!("could not decode crates.io response: {error}")))?;
+    Ok(response
+        .versions
+        .iter()
+        .any(|published| published.num == version))
+}
+
 pub(crate) fn trusted_publisher_plan(
     package: &str,
     repository: &Repository,
@@ -314,6 +346,53 @@ pub(crate) mod tests {
             owner: owner.to_owned(),
             name: name.to_owned(),
         }
+    }
+
+    #[test]
+    fn checks_crates_io_versions_for_an_exact_match() {
+        let mut environment = Environment::new();
+        let (api, server) = mock_server(vec![
+            (200, r#"{"versions":[{"num":"1.2.3"},{"num":"1.2.2"}]}"#),
+            (200, r#"{"versions":[{"num":"1.2.2"}]}"#),
+            (200, "{}"),
+        ]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+
+        assert!(version_is_published("fixture", "1.2.3").unwrap());
+        assert!(!version_is_published("fixture", "1.2.3").unwrap());
+        assert!(!version_is_published("fixture", "1.2.3").unwrap());
+        assert_eq!(server.join().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn treats_missing_crates_as_unpublished_and_reports_registry_errors() {
+        let mut environment = Environment::new();
+        assert!(version_is_published("bad/name", "1.2.3").is_err());
+
+        let (api, server) = mock_server(vec![(404, "crate not found")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(!version_is_published("missing", "1.2.3").unwrap());
+        server.join().unwrap();
+
+        let (api, server) = mock_server(vec![(403, "registry denied")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(
+            version_is_published("fixture", "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("HTTP 403: registry denied")
+        );
+        server.join().unwrap();
+
+        let (api, server) = mock_server(vec![(200, "not json")]);
+        environment.set("BAKE_TEST_CRATES_IO_API", &api);
+        assert!(
+            version_is_published("fixture", "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("could not decode crates.io response")
+        );
+        server.join().unwrap();
     }
 
     #[test]
