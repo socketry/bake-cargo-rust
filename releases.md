@@ -1,5 +1,9 @@
 # Releases
 
+## v0.4.3
+
+- Align the readme title, release instructions, and related project links.
+
 ## v0.4.2
 
 - Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
