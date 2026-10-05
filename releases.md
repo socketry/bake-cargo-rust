@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.4.3
 
 - Align the readme title, release instructions, and related project links.
 

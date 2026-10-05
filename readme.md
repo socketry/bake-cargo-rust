@@ -117,6 +117,10 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.3
+
+- Align the readme title, release instructions, and related project links.
+
 ### v0.4.2
 
 - Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
@@ -127,11 +131,6 @@ See [releases.md](releases.md) for the full release history.
 ### v0.4.1
 
 - Treat a missing base Cargo manifest as the initial package release.
-
-### v0.4.0
-
-- Remove the temporary `releases:github:release` compatibility alias in favor of `cargo:releases:github:release`.
-- Replace the inline publish workflow release scripts with standard Bake Cargo tasks for detection, validation, publishing, tagging, and GitHub Release sync.
 
 <!-- bake-readme:releases:end -->
 
