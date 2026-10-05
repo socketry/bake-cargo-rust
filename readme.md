@@ -83,14 +83,25 @@ cargo bake cargo:setup:workflow
 ```
 
 It refuses to replace a different existing file. Use `--force true` only after
-reviewing the generated output. The workflow runs workspace checks on pull
-requests and branch updates. `cargo:release:detect` compares the workspace
-version with the pull request base or previous branch commit, validates the
-release heading, and reports whether a versioned release is ready. The
-`cargo:release` task packages the candidate on release changes. Ordinary
-commits do not publish. After merge, `cargo:publish:pending` checks which
-workspace packages still need that version; the workflow exchanges a GitHub
-OIDC token for a short-lived crates.io token only when uploads remain.
+reviewing the generated output.
+
+The standard workflows have separate responsibilities. `test.yml` runs the
+project's tests and coverage checks on pull requests and pushes. `publish.yml`
+runs release validation, formatting, and Clippy on pull requests, but skips its
+ordinary test command because `test.yml` already tests the proposed changes.
+On pushes to `main`, `publish.yml` runs ordinary workspace tests in its `check`
+job before the `publish` job can start. `test.yml` also runs on pushes, so the
+branch gets both coverage results and the test run required before publishing.
+The `publish` job only runs after a successful check when the push contains a
+versioned release.
+
+`cargo:release:detect` compares the workspace version with the pull request
+base or previous branch commit, validates the release heading, and reports
+whether a versioned release is ready. The `cargo:release` task packages the
+candidate on release changes. Ordinary commits do not publish. After merge,
+`cargo:publish:pending` checks which workspace packages still need that version;
+the workflow exchanges a GitHub OIDC token for a short-lived crates.io token
+only when uploads remain.
 `cargo:release:publish` publishes the remaining packages, creates and pushes
 the annotated `vVERSION` tag, and creates or updates the matching GitHub
 Release through `cargo:releases:github:release`. The workflow uses the GitHub
