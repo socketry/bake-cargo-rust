@@ -96,7 +96,7 @@ pub(crate) fn validate_branch(branch: &str) -> Result<()> {
 
 pub(crate) fn effective_checks(checks: &[String]) -> Vec<String> {
     if checks.is_empty() {
-        vec!["check".to_owned()]
+        vec!["check".to_owned(), "test-result".to_owned()]
     } else {
         checks.to_vec()
     }
@@ -555,8 +555,11 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_the_generated_workflow_check() {
-        assert_eq!(effective_checks(&[]), vec!["check".to_owned()]);
+    fn defaults_to_publish_and_test_workflow_checks() {
+        assert_eq!(
+            effective_checks(&[]),
+            vec!["check".to_owned(), "test-result".to_owned()]
+        );
         assert_eq!(
             effective_checks(&["custom check".to_owned()]),
             vec!["custom check".to_owned()]
