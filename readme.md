@@ -1,15 +1,11 @@
-# Bake Cargo
+# `bake-cargo`
 
-`bake-cargo` provides reusable tasks for Cargo projects. Cargo operations register beneath `cargo`, including GitHub release creation at `cargo:releases:github:release`. Add the package to an unpublished `bake/` task binary and link it once:
+`bake-cargo` provides reusable tasks for Cargo projects. Cargo operations register beneath `cargo`, including GitHub release creation at `cargo:releases:github:release`. Add the package to an unpublished `bake/` task binary and regenerate its task links:
 
-```toml
-[dependencies]
-bake = "0.19"
-bake-cargo = { version = "0.4" }
-```
-
-```rust,ignore
-use bake_cargo as _;
+```sh
+cargo bake --regenerate
+cargo add --manifest-path bake/Cargo.toml bake-cargo
+cargo bake --regenerate
 ```
 
 This crate links `bake-releases` and `bake-license`, so release-document tasks and `license:update` are also available without extra imports. The task executable links `socketry-project`, which provides the standard project tasks and hooks. Run `cargo bake agent:context:install` to install context from dependencies such as `bake`; generated context and skills are excluded locally through Git's `info/exclude` file and do not add rules to `.gitignore`. Shared Rust guidance lives in [Bake Agent Context](https://github.com/socketry/bake-agent-context-rust/blob/main/context/rust.md). For the standard Socketry release process, use the [Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md). This Readme and each task's `--help` output document the Bake Cargo commands. Link Bake Agent Context in your private `bake/` package, directly or through `socketry-project`, then run `cargo bake --regenerate` to link its tasks and `cargo bake agent:context:install` to install guidance from dependencies.
@@ -111,6 +107,10 @@ The task uses the authenticated `gh` CLI. Omit `--draft true` to publish the rel
 
 The Cargo release integration supports crates.io and GitHub Actions. It edits Cargo package version fields and local dependency requirements, but does not commit changes or publish crates itself. The GitHub release task publishes a GitHub Release explicitly. The setup task only manages its named repository rulesets, and GitHub may require repository or organization plan features for some settings.
 
+## Releasing
+
+Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a pull request. After review and merge, GitHub Actions publishes the release when the configured `crates-io` environment approves it, then creates or updates the matching GitHub Release from `releases.md`. Follow the shared [Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md) for the standard process.
+
 ## Releases
 
 <!-- bake-readme:releases:start -->
@@ -135,6 +135,11 @@ See [releases.md](releases.md) for the full release history.
 
 <!-- bake-readme:releases:end -->
 
+## See Also
+
+- [`bake`](https://github.com/socketry/bake-rust).
+- [`bake-releases-cargo`](https://github.com/socketry/bake-releases-cargo-rust).
+
 ## Contributing
 
 Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-cargo-rust).
@@ -142,7 +147,3 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 ### Agent Context
 
 Run `cargo bake agent:context:install` to install shared context and skills. Read `.agents/context/index.md` to find relevant guides, follow `agents.md` if present, and apply skills under `.agents/skills/`. The installer preserves repository-owned `agents.md`; it does not create or regenerate that file.
-
-## Releasing
-
-Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a pull request. After review and merge, GitHub Actions publishes the release when the configured `crates-io` environment approves it, then creates or updates the matching GitHub Release from `releases.md`. Follow the shared [Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md) for the standard process.

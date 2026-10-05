@@ -31,15 +31,15 @@ dependencies = [
 
 [[package]]
 name = "bake-agent-context"
-version = "0.2.2"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92043e5abb0627f904bd863b397f86fa1fe0ff25a9a71150fd5663b587fa5bd5"
+checksum = "9d0559ad6c6b640ec182f6378ca77825c4327f7b4fce65cfa84e47e25a1bfcb5"
 dependencies = [
  "bake",
  "serde",
  "serde_json",
  "serde_yaml_ng",
- "socketry-markdown 0.1.0",
+ "socketry-markdown 0.2.0",
 ]
 
 [[package]]
@@ -100,9 +100,9 @@ dependencies = [
 
 [[package]]
 name = "bake-readme"
-version = "0.1.6"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24fe3770977781484405d216b11a614a3e26404bb932bdddde718fad206f35c0"
+checksum = "48b3733cc48991e6482c04b4997db89f75a7200e2c546c73047bd24e323c3f2a"
 dependencies = [
  "bake",
  "serde_json",
@@ -123,9 +123,9 @@ dependencies = [
 
 [[package]]
 name = "bake-test-rust"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9d5ceec9cc08a3bb421dd3755ad9e073831934793aa88d8f55095ad98c1dc45"
+checksum = "3ced0bd0b0ae3f8df4b3cbb03b2a98080a5a9504c6b758c3eb96929dfd3dae93"
 dependencies = [
  "bake",
  "serde_json",
@@ -657,6 +657,16 @@ name = "socketry-markdown"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb6b36f84563d391bc2e67e1c8aef731a773acafd4bf4a9c97886f3771133610"
+dependencies = [
+ "regex",
+ "unicode-id",
+]
+
+[[package]]
+name = "socketry-markdown"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37d3a646262edeca60e86e4c4dd493167e74beb03ea75a60b2d5c40e6d6d8c5b"
 dependencies = [
  "regex",
  "unicode-id",
