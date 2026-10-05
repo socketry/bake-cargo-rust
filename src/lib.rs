@@ -31,7 +31,7 @@ use crate::{cargo_support as cargo_helpers, github as github_helpers};
 /// Validate and package a release candidate before opening a reviewed pull request.
 #[bake::task]
 pub fn release(context: &mut Context) -> Result<Value> {
-    let version = crate::version_support::workspace_version(context)?;
+    let version = crate::version_support::workspace_version(context)?.to_string();
     crate::release::prepare(context, &version)
 }
 
@@ -463,6 +463,12 @@ mod task_tests {
         Ok(())
     }
 
+    #[bake::task(name = "cargo:after_version_bump")]
+    fn fail_version_hook(context: &mut bake::Context, _version: String) -> Result<()> {
+        let _ = context;
+        Err(bake::Error::new("hook failed"))
+    }
+
     #[test]
     fn exposes_package_release_and_direct_cargo_tasks() {
         let mut environment = Environment::new();
@@ -587,6 +593,59 @@ mod task_tests {
     }
 
     #[test]
+    fn reports_workflow_directory_read_and_write_errors() {
+        let mut environment = Environment::new();
+        let repository = project();
+        repository.cargo_proxy(&mut environment, None);
+        repository.write(".github", "not a directory");
+        assert!(
+            setup::workflow(
+                &mut repository.context(),
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false,
+            )
+            .is_err()
+        );
+
+        let unreadable = project();
+        unreadable.cargo_proxy(&mut environment, None);
+        std::fs::create_dir_all(unreadable.root().join(".github/workflows/publish.yml")).unwrap();
+        assert!(
+            setup::workflow(
+                &mut unreadable.context(),
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false,
+            )
+            .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let unwritable = project();
+            unwritable.cargo_proxy(&mut environment, None);
+            let directory = unwritable.root().join(".github/workflows");
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut permissions = std::fs::metadata(&directory).unwrap().permissions();
+            permissions.set_mode(0o500);
+            std::fs::set_permissions(&directory, permissions).unwrap();
+            let result = setup::workflow(
+                &mut unwritable.context(),
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false,
+            );
+            let mut permissions = std::fs::metadata(&directory).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&directory, permissions).unwrap();
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
     fn rejects_empty_or_inconsistently_versioned_publish_workspaces() {
         let mut environment = Environment::new();
         let empty = Project::new();
@@ -701,6 +760,112 @@ mod task_tests {
     }
 
     #[test]
+    fn public_github_tasks_propagate_repository_metadata_and_lookup_errors() {
+        let mut environment = Environment::new();
+        let malformed_reviewers = Project::new();
+        malformed_reviewers.single_package("fixture", "1.2.3");
+        malformed_reviewers.write(
+            "Cargo.toml",
+            "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n\n[workspace.metadata.bake.release]\nreviewers = \"not-an-array\"\n",
+        );
+        malformed_reviewers.cargo_proxy(&mut environment, None);
+        assert!(
+            setup::github::plan(
+                &mut malformed_reviewers.context(),
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                1,
+                Vec::new(),
+                Vec::new(),
+                None,
+                "crates-io".to_owned(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("must be an array")
+        );
+        assert!(
+            setup::github::apply(
+                &mut malformed_reviewers.context(),
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                1,
+                Vec::new(),
+                Vec::new(),
+                None,
+                "crates-io".to_owned(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("must be an array")
+        );
+
+        let lookup_failure = project();
+        lookup_failure.cargo_proxy(&mut environment, None);
+        install_gh(
+            &lookup_failure,
+            &mut environment,
+            "#!/bin/sh\necho reviewer lookup denied >&2; exit 1\n",
+        );
+        for apply in [false, true] {
+            let error = if apply {
+                setup::github::apply(
+                    &mut lookup_failure.context(),
+                    "socketry/fixture".to_owned(),
+                    "main".to_owned(),
+                    1,
+                    Vec::new(),
+                    vec!["ioquatix".to_owned()],
+                    None,
+                    "crates-io".to_owned(),
+                )
+            } else {
+                setup::github::plan(
+                    &mut lookup_failure.context(),
+                    "socketry/fixture".to_owned(),
+                    "main".to_owned(),
+                    1,
+                    Vec::new(),
+                    vec!["ioquatix".to_owned()],
+                    None,
+                    "crates-io".to_owned(),
+                )
+            }
+            .unwrap_err();
+            assert!(error.to_string().contains("reviewer lookup denied"));
+        }
+
+        let invalid_repository = project();
+        invalid_repository.cargo_proxy(&mut environment, None);
+        for apply in [false, true] {
+            let result = if apply {
+                setup::github::apply(
+                    &mut invalid_repository.context(),
+                    "bad owner/name".to_owned(),
+                    "main".to_owned(),
+                    1,
+                    Vec::new(),
+                    vec!["User:123".to_owned()],
+                    None,
+                    "crates-io".to_owned(),
+                )
+            } else {
+                setup::github::plan(
+                    &mut invalid_repository.context(),
+                    "bad owner/name".to_owned(),
+                    "main".to_owned(),
+                    1,
+                    Vec::new(),
+                    vec!["User:123".to_owned()],
+                    None,
+                    "crates-io".to_owned(),
+                )
+            };
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
     fn applies_github_setup_using_the_generated_workspace_metadata() {
         let mut environment = Environment::new();
         let project = project();
@@ -792,6 +957,99 @@ mod task_tests {
         assert_eq!(configured["status"], "created");
         assert_eq!(required["trustpub_only"], true);
         assert_eq!(requests.len(), 3);
+    }
+
+    #[test]
+    fn trusted_publishing_tasks_propagate_package_and_origin_errors() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut context = project.context();
+
+        assert!(
+            trusted_publishing::plan(
+                &mut context,
+                "missing".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+        assert!(
+            trusted_publishing::configure(
+                &mut context,
+                "missing".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+        assert!(trusted_publishing::require(&mut context, "missing".to_owned(), true).is_err());
+
+        assert!(
+            bootstrap(
+                &mut context,
+                "fixture".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+        assert!(
+            trusted_publishing::plan(
+                &mut context,
+                "fixture".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+        assert!(
+            trusted_publishing::configure(
+                &mut context,
+                "fixture".to_owned(),
+                "publish.yml".to_owned(),
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn public_cargo_tasks_propagate_metadata_errors() {
+        let mut environment = Environment::new();
+        let project = project();
+        let failed_cargo = project.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata denied >&2; exit 1\n",
+        );
+        environment.set("CARGO", failed_cargo.as_os_str());
+        assert!(release(&mut project.context()).is_err());
+        assert!(packages(&mut project.context()).is_err());
+        assert!(version::patch(&mut project.context()).is_err());
+        assert!(version::bump(&mut project.context(), "2.0.0".to_owned()).is_err());
+        assert!(
+            setup::workflow(
+                &mut project.context(),
+                "publish.yml".to_owned(),
+                "main".to_owned(),
+                false,
+            )
+            .is_err()
+        );
+        assert!(
+            setup::github::plan(
+                &mut project.context(),
+                "socketry/fixture".to_owned(),
+                "main".to_owned(),
+                1,
+                Vec::new(),
+                vec!["User:123".to_owned()],
+                None,
+                "crates-io".to_owned(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -908,6 +1166,41 @@ mod task_tests {
             "2.3.1"
         );
         assert_eq!(context.get::<String>().map(String::as_str), Some("2.3.1"));
+    }
+
+    #[test]
+    fn propagates_after_version_bump_hook_errors_from_every_version_task() {
+        let mut environment = Environment::new();
+        let project = project();
+        project.cargo_proxy(&mut environment, None);
+        let mut registry = Registry::new();
+        registry.register(fail_version_hook_task()).unwrap();
+        let mut context = registry.context(project.root());
+
+        assert!(
+            version::patch(&mut context)
+                .unwrap_err()
+                .to_string()
+                .contains("hook failed")
+        );
+        assert!(
+            version::minor(&mut context)
+                .unwrap_err()
+                .to_string()
+                .contains("hook failed")
+        );
+        assert!(
+            version::major(&mut context)
+                .unwrap_err()
+                .to_string()
+                .contains("hook failed")
+        );
+        assert!(
+            version::bump(&mut context, "2.1.0".to_owned())
+                .unwrap_err()
+                .to_string()
+                .contains("hook failed")
+        );
     }
 
     #[test]

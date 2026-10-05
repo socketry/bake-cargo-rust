@@ -88,7 +88,11 @@ pub mod github {
         let mut child = command.spawn()?;
         write_release_notes(child.stdin.take(), notes)?;
 
-        Ok(child.wait_with_output()?)
+        collect_release_output(|| child.wait_with_output())
+    }
+
+    fn collect_release_output(wait: impl FnOnce() -> std::io::Result<Output>) -> Result<Output> {
+        Ok(wait()?)
     }
 
     fn write_release_notes(stdin: Option<ChildStdin>, notes: &str) -> Result<()> {
@@ -200,8 +204,9 @@ pub mod github {
     #[cfg(test)]
     mod tests {
         use super::{
-            Release, ReleaseAction, action_for, existing_release, existing_url,
-            release as release_task, run_release_command, run_with_notes, write_release_notes,
+            Release, ReleaseAction, action_for, collect_release_output, existing_release,
+            existing_url, release as release_task, run_release_command, run_with_notes,
+            write_release_notes,
         };
         use crate::test_support::{Environment, Project, shell_quote};
         use bake::{Context, Registry};
@@ -567,6 +572,38 @@ pub mod github {
                     .unwrap_err()
                     .to_string()
                     .contains("failed to open GitHub CLI input")
+            );
+
+            assert!(
+                collect_release_output(|| Err(std::io::Error::other("wait failed")))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("wait failed")
+            );
+        }
+
+        #[test]
+        fn propagates_release_note_write_failures_from_the_release_task() {
+            let mut environment = Environment::new();
+            let project = Project::new();
+            let notes = "x".repeat(1024 * 1024);
+            project.write("releases.md", &format!("## v1.2.3\n\n{notes}\n"));
+            with_gh(
+                &project,
+                &mut environment,
+                "#!/bin/sh\nif [ \"$1 $2\" = 'release view' ]; then echo 'release not found' >&2; exit 1; fi\nexec 0<&-\n",
+            );
+
+            assert!(
+                release_task(
+                    &mut context(&project),
+                    "v1.2.3".to_owned(),
+                    "releases.md".into(),
+                    false,
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("Broken pipe")
             );
         }
 

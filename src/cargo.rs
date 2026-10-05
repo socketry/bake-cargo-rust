@@ -407,6 +407,9 @@ reviewers = ["Team:123"]
         let missing = project.root().join("missing-cargo");
         environment.set("CARGO", missing.as_os_str());
         assert!(run_cargo(&project.context(), ["check"]).is_err());
+        assert!(run_cargo_arguments(&project.context(), &["check".to_owned()]).is_err());
+        assert!(workspace_packages(&project.context()).is_err());
+        assert!(package_by_name(&project.context(), "fixture").is_err());
     }
 
     #[test]

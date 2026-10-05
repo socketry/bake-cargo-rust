@@ -18,8 +18,8 @@ pub fn detect_release(context: &mut Context, base: String, sha: String) -> Resul
         return Err(Error::new("release commit must be a nonempty Git revision"));
     }
 
-    let version = workspace_version(context)?;
-    let current = Version::parse(&version)?;
+    let current = workspace_version(context)?;
+    let version = current.to_string();
     let previous = previous_versions(context, &base)?;
     let changed = match previous.as_deref() {
         Some(previous) => {
@@ -59,8 +59,16 @@ pub fn detect_release(context: &mut Context, base: String, sha: String) -> Resul
     }
 
     let version = if changed { version } else { String::new() };
-    append_github_output("release", if changed { "true" } else { "false" })?;
-    append_github_output("version", &version)?;
+    append_release_outputs(changed, &version, append_github_output)
+}
+
+fn append_release_outputs(
+    changed: bool,
+    version: &str,
+    mut append: impl FnMut(&str, &str) -> Result<()>,
+) -> Result<Value> {
+    append("release", if changed { "true" } else { "false" })?;
+    append("version", version)?;
 
     Ok(json!({"release": changed, "version": version}))
 }
@@ -311,6 +319,10 @@ fn append_github_output(name: &str, value: &str) -> Result<()> {
     };
 
     let mut output = OpenOptions::new().append(true).create(true).open(path)?;
+    write_github_output(&mut output, name, value)
+}
+
+fn write_github_output(output: &mut impl Write, name: &str, value: &str) -> Result<()> {
     writeln!(output, "{name}={value}")?;
     Ok(())
 }
@@ -473,6 +485,57 @@ mod tests {
     }
 
     #[test]
+    fn propagates_release_output_failures() {
+        for fail_on in ["release", "version"] {
+            assert!(
+                append_release_outputs(true, "1.2.3", |name, _| {
+                    if name == fail_on {
+                        Err(Error::new(format!("failed to append {name}")))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .unwrap_err()
+                .to_string()
+                .contains(fail_on)
+            );
+        }
+
+        struct RejectWrite;
+
+        impl Write for RejectWrite {
+            fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("output is unavailable"))
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        assert!(
+            write_github_output(&mut RejectWrite, "release", "true")
+                .unwrap_err()
+                .to_string()
+                .contains("output is unavailable")
+        );
+        let mut writer = RejectWrite;
+        assert!(writer.flush().is_ok());
+
+        let mut environment = Environment::new();
+        let project = release_project("1.2.3");
+        prepare_workspace(&project, &mut environment);
+        let output_directory = project.root().join("github-output-directory");
+        fs::create_dir(&output_directory).unwrap();
+        environment.set("GITHUB_OUTPUT", output_directory.as_os_str());
+        let (api, server) = crate::crates_io::tests::mock_server(vec![(404, "crate not found")]);
+        set_crates_io_api(&mut environment, &api);
+
+        assert!(pending_packages(&mut context(&project), "1.2.3".to_owned()).is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
     fn detects_a_new_release_and_appends_github_outputs() {
         let mut environment = Environment::new();
         let project = release_project("1.2.2");
@@ -515,6 +578,59 @@ mod tests {
         assert_eq!(
             fs::read_to_string(output).unwrap(),
             "release=true\nversion=1.2.3\n"
+        );
+    }
+
+    #[test]
+    fn reports_detect_release_metadata_previous_version_and_git_errors() {
+        let mut environment = Environment::new();
+        let metadata_failure = release_project("1.2.3");
+        environment.set(
+            "CARGO",
+            metadata_failure.root().join("missing-cargo").as_os_str(),
+        );
+        assert!(
+            detect_release(
+                &mut context(&metadata_failure),
+                String::new(),
+                "deadbeef".to_owned(),
+            )
+            .is_err()
+        );
+
+        let invalid_previous = release_project("not-a-version");
+        let base = initialize_git(&invalid_previous, false);
+        invalid_previous.write(
+            "Cargo.toml",
+            "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        invalid_previous.write("releases.md", "# Releases\n\n## v1.2.3\n\nNotes.\n");
+        invalid_previous.cargo_proxy(&mut environment, None);
+        assert!(
+            detect_release(&mut context(&invalid_previous), base, "deadbeef".to_owned(),)
+                .unwrap_err()
+                .to_string()
+                .contains("stable MAJOR.MINOR.PATCH")
+        );
+
+        let missing_git = release_project("1.2.3");
+        missing_git.cargo_proxy(&mut environment, None);
+        environment.set("PATH", missing_git.root().as_os_str());
+        assert!(
+            detect_release(
+                &mut context(&missing_git),
+                "base-revision".to_owned(),
+                "deadbeef".to_owned(),
+            )
+            .is_err()
+        );
+        assert!(
+            detect_release(
+                &mut context(&missing_git),
+                "000000".to_owned(),
+                "deadbeef".to_owned(),
+            )
+            .is_err()
         );
     }
 
@@ -607,6 +723,77 @@ mod tests {
             previous_versions(&context(&project), "000000").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn reports_previous_workspace_metadata_git_and_manifest_errors() {
+        let mut environment = Environment::new();
+        let failed_metadata = release_project("1.2.3");
+        let base = initialize_git(&failed_metadata, false);
+        let cargo = failed_metadata.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata denied >&2; exit 1\n",
+        );
+        environment.set("CARGO", cargo.as_os_str());
+        assert!(
+            previous_versions(&context(&failed_metadata), &base)
+                .unwrap_err()
+                .to_string()
+                .contains("metadata denied")
+        );
+
+        for (previous_manifest, expected_error) in [
+            ("not valid toml = [\n", Some("could not parse")),
+            (
+                "[package]\nname = \"fixture\"\nversion.workspace = false\n",
+                None,
+            ),
+        ] {
+            let project = Project::new();
+            project.write(
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crates/fixture\"]\nresolver = \"3\"\n",
+            );
+            project.write("crates/fixture/Cargo.toml", previous_manifest);
+            let base = initialize_git(&project, false);
+            project.write(
+                "crates/fixture/Cargo.toml",
+                "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+            );
+            project.write("crates/fixture/src/lib.rs", "// fixture\n");
+            prepare_workspace(&project, &mut environment);
+            let result = previous_versions(&context(&project), &base);
+            match expected_error {
+                Some(expected) => {
+                    let error = result.unwrap_err();
+                    assert!(error.to_string().contains(expected), "{error}");
+                }
+                None => assert_eq!(result.unwrap(), None),
+            }
+        }
+
+        let project = Project::new();
+        project.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/fixture\"]\nresolver = \"3\"\n",
+        );
+        project.write(
+            "crates/fixture/Cargo.toml",
+            "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+        );
+        project.write("crates/fixture/src/lib.rs", "// fixture\n");
+        prepare_workspace(&project, &mut environment);
+        let base = initialize_git(&project, false);
+        let fake_git = project.executable(
+            "git",
+            &format!(
+                "#!/bin/sh\n/bin/cat {}\n/bin/rm \"$0\"\n",
+                shell_quote(&project.root().join("Cargo.toml"))
+            ),
+        );
+        let fake_bin = fake_git.parent().unwrap();
+        environment.set("PATH", fake_bin.as_os_str());
+        assert!(previous_versions(&context(&project), &base).is_err());
     }
 
     #[test]
@@ -842,6 +1029,46 @@ mod tests {
                 .contains("second has version 1.2.4, expected 1.2.3")
         );
         assert!(publication_state(&context(&mixed), "invalid").is_err());
+
+        let failed_metadata = Project::new();
+        let failed_cargo = failed_metadata.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata denied >&2; exit 1\n",
+        );
+        environment.set("CARGO", failed_cargo.as_os_str());
+        assert!(publication_state(&context(&failed_metadata), "1.2.3").is_err());
+
+        let invalid_version = Project::new();
+        let metadata = serde_json::json!({
+            "packages": [{
+                "name": "fixture",
+                "version": "not-a-version",
+                "manifest_path": invalid_version.root().join("Cargo.toml")
+            }]
+        });
+        let cargo = invalid_version.executable(
+            "cargo-metadata",
+            &format!("#!/bin/sh\nprintf '%s' '{}'\n", metadata),
+        );
+        environment.set("CARGO", cargo.as_os_str());
+        assert!(publication_state(&context(&invalid_version), "1.2.3").is_err());
+    }
+
+    #[test]
+    fn reports_crates_io_errors_while_checking_publication_state() {
+        let mut environment = Environment::new();
+        let project = release_project("1.2.3");
+        prepare_workspace(&project, &mut environment);
+        let (api, server) = crate::crates_io::tests::mock_server(vec![(403, "registry denied")]);
+        set_crates_io_api(&mut environment, &api);
+
+        assert!(
+            publication_state(&context(&project), "1.2.3")
+                .unwrap_err()
+                .to_string()
+                .contains("registry denied")
+        );
+        server.join().unwrap();
     }
 
     #[test]
@@ -937,6 +1164,9 @@ mod tests {
         let project = release_project("1.2.3");
         prepare_workspace(&project, &mut environment);
         let sha = initialize_git(&project, false);
+        assert!(
+            publish_release(&mut context(&project), "invalid".to_owned(), sha.clone()).is_err()
+        );
         let (api, server) = crate::crates_io::tests::mock_server(vec![(404, "crate not found")]);
         set_crates_io_api(&mut environment, &api);
         environment.set("BAKE_TEST_CARGO_FAILURE", "publish");
@@ -963,6 +1193,25 @@ mod tests {
     }
 
     #[test]
+    fn propagates_tag_creation_errors_from_release_publishing() {
+        let mut environment = Environment::new();
+        let project = release_project("1.2.3");
+        prepare_workspace(&project, &mut environment);
+        let sha = initialize_git(&project, false);
+        let (api, server) =
+            crate::crates_io::tests::mock_server(vec![(200, r#"{"versions":[{"num":"1.2.3"}]}"#)]);
+        set_crates_io_api(&mut environment, &api);
+
+        assert!(
+            publish_release(&mut context(&project), "1.2.3".to_owned(), sha)
+                .unwrap_err()
+                .to_string()
+                .contains("git push origin refs/tags/v1.2.3 failed")
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     fn propagates_errors_while_configuring_or_creating_the_tag() {
         let mut environment = Environment::new();
         let project = Project::new();
@@ -981,6 +1230,29 @@ mod tests {
             environment.set("BAKE_TEST_GIT_FAILURE", command);
             assert!(create_release_tag(&context, "v1.2.3", "deadbeef").is_err());
         }
+    }
+
+    #[test]
+    fn reports_git_process_launch_failures_during_tagging() {
+        let mut environment = Environment::new();
+        let missing_git = release_project("1.2.3");
+        let sha = initialize_git(&missing_git, false);
+        environment.set("PATH", missing_git.root().as_os_str());
+        assert!(create_release_tag(&context(&missing_git), "v1.2.3", &sha).is_err());
+
+        let original_path = environment.original("PATH").unwrap();
+        environment.set("PATH", original_path);
+        let project = release_project("1.2.3");
+        let sha = initialize_git(&project, false);
+        let fake_git = project.executable(
+            "git",
+            &format!(
+                "#!/bin/sh\nif [ \"$1\" = rev-list ]; then printf '%s' '{}'; /bin/rm \"$0\"; exit 0; fi\nexit 0\n",
+                sha
+            ),
+        );
+        environment.set("PATH", fake_git.parent().unwrap().as_os_str());
+        assert!(create_release_tag(&context(&project), "v1.2.3", &sha).is_err());
     }
 
     #[test]

@@ -173,6 +173,14 @@ mod tests {
         use crate::test_support::{Environment, Project};
 
         let mut environment = Environment::new();
+        let failed_metadata = Project::new();
+        let cargo = failed_metadata.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata denied >&2; exit 1\n",
+        );
+        environment.set("CARGO", cargo.as_os_str());
+        assert!(prepare(&failed_metadata.context(), "1.2.3").is_err());
+
         let empty = Project::new();
         empty.write(
             "Cargo.toml",

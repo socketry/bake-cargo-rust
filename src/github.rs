@@ -4,7 +4,7 @@
 use bake::{Context, Error, Result, Value};
 use serde_json::{Value as JsonValue, json};
 use std::io::Write;
-use std::process::{ChildStdin, Stdio};
+use std::process::{ChildStdin, Output, Stdio};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Repository {
@@ -494,7 +494,15 @@ pub(crate) fn github_api(
     if let Some(body) = body {
         write_api_input(child.stdin.take(), body)?;
     }
-    let output = child.wait_with_output()?;
+    read_api_response(method, path, || child.wait_with_output())
+}
+
+fn read_api_response(
+    method: &str,
+    path: &str,
+    wait: impl FnOnce() -> std::io::Result<Output>,
+) -> Result<JsonValue> {
+    let output = wait()?;
     if !output.status.success() {
         return Err(Error::new(format!(
             "GitHub API request {method} {path} failed: {}",
@@ -508,7 +516,7 @@ pub(crate) fn github_api(
         .map_err(|error| Error::new(format!("could not parse GitHub API response: {error}")))
 }
 
-fn write_api_input(stdin: Option<ChildStdin>, body: &JsonValue) -> Result<()> {
+fn write_api_input<T: serde::Serialize>(stdin: Option<ChildStdin>, body: &T) -> Result<()> {
     let contents = serde_json::to_vec(body)?;
     stdin
         .ok_or_else(|| Error::new("could not open GitHub CLI input"))?
@@ -519,7 +527,7 @@ fn write_api_input(stdin: Option<ChildStdin>, body: &JsonValue) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Environment, Project};
+    use crate::test_support::{Environment, Project, shell_quote};
     use std::process::Command;
 
     fn with_fake_gh(project: &Project, environment: &mut Environment, script: &str) {
@@ -683,7 +691,7 @@ mod tests {
 
     #[test]
     fn reports_an_origin_command_failure_for_a_git_repository_without_origin() {
-        let _environment = Environment::new();
+        let mut environment = Environment::new();
         let project = Project::new();
         assert!(
             Command::new("git")
@@ -700,6 +708,9 @@ mod tests {
                 .to_string()
                 .contains("could not read the origin Git remote")
         );
+
+        environment.set("PATH", project.root().as_os_str());
+        assert!(Repository::from_origin(&project.context()).is_err());
     }
 
     #[test]
@@ -727,7 +738,7 @@ mod tests {
         with_fake_gh(
             &project,
             &mut environment,
-            "#!/bin/sh\ncase \"$*\" in\n  'api --method GET users/ioquatix') printf '%s' '{\"id\":42}' ;;\n  'api --method GET orgs/Socketry/teams/managers') printf '%s' '{\"id\":99}' ;;\n  'api --method GET users/missing') printf '%s' '{}' ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
+            "#!/bin/sh\ncase \"$*\" in\n  'api --method GET users/ioquatix') printf '%s' '{\"id\":42}' ;;\n  'api --method GET orgs/Socketry/teams/managers') printf '%s' '{\"id\":99}' ;;\n  'api --method GET users/missing') printf '%s' '{}' ;;\n  'api --method GET users/denied') echo denied >&2; exit 1 ;;\n  *) echo unexpected-request >&2; exit 1 ;;\nesac\n",
         );
         let repository = Repository {
             owner: "socketry".to_owned(),
@@ -746,6 +757,9 @@ mod tests {
         assert_eq!(resolved.configured[0], "User:7");
         assert_eq!(resolved.resolved, ["User:7", "User:42", "Team:99"]);
         assert!(
+            resolve_reviewers(&project.context(), &repository, &["bad login".to_owned()]).is_err()
+        );
+        assert!(
             resolve_reviewers(
                 &project.context(),
                 &repository,
@@ -760,6 +774,12 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("no numeric ID")
+        );
+        assert!(
+            resolve_reviewers(&project.context(), &repository, &["denied".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("denied")
         );
     }
 
@@ -814,12 +834,80 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_failure_while_waiting_for_the_github_cli() {
+        assert!(
+            read_api_response("GET", "fixture", || {
+                Err(std::io::Error::other("wait failed"))
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("wait failed")
+        );
+    }
+
+    #[test]
     fn reports_missing_github_cli_input() {
+        let mut environment = Environment::new();
         assert!(
             write_api_input(None, &json!({}))
                 .unwrap_err()
                 .to_string()
                 .contains("could not open GitHub CLI input")
+        );
+
+        let project = Project::new();
+        let ready = project.root().join("reader-closed");
+        let script = format!("exec 0<&-; touch {}; sleep 1", shell_quote(&ready));
+        let mut child = Command::new("sh")
+            .args(["-c", script.as_str()])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        for _ in 0..200 {
+            if ready.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            ready.exists(),
+            "child closed stdin before the test timed out"
+        );
+        let error =
+            write_api_input(child.stdin.take(), &json!({"value": "closed pipe"})).unwrap_err();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(error.to_string().contains("Broken pipe"));
+
+        with_fake_gh(&project, &mut environment, "#!/bin/sh\nexec 0<&-\n");
+        assert!(
+            github_api(
+                &project.context(),
+                "PUT",
+                "closed-pipe",
+                Some(&json!({"x": "x".repeat(1024 * 1024)})),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("Broken pipe")
+        );
+
+        struct FailsSerialization;
+
+        impl serde::Serialize for FailsSerialization {
+            fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("injected serialization failure"))
+            }
+        }
+
+        assert!(
+            write_api_input(None, &FailsSerialization)
+                .unwrap_err()
+                .to_string()
+                .contains("injected serialization failure")
         );
     }
 
@@ -831,7 +919,11 @@ mod tests {
                 {"type": "required_reviewers", "prevent_self_review": true, "reviewers": [
                     {"type": "Team", "reviewer": {"id": 42}},
                     {"type": "User", "reviewer": {"id": 7}},
-                    {"type": "Team", "reviewer": {}}
+                    {"type": "Team", "reviewer": {}},
+                    {},
+                    {"type": 7},
+                    {"type": "User"},
+                    {"type": "User", "reviewer": {"id": "not numeric"}}
                 ]}
             ],
             "deployment_branch_policy": {"protected_branches": true}
@@ -939,6 +1031,19 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("invalid environments response")
+        );
+
+        let failed = Project::new();
+        with_fake_gh(
+            &failed,
+            &mut environment,
+            "#!/bin/sh\necho environment lookup denied >&2; exit 1\n",
+        );
+        assert!(
+            existing_environment(&failed.context(), &repository, "crates-io")
+                .unwrap_err()
+                .to_string()
+                .contains("environment lookup denied")
         );
     }
 
@@ -1092,6 +1197,82 @@ mod tests {
         )
         .unwrap();
         assert_eq!(environment_body["reviewers"][0]["id"], 123);
+    }
+
+    #[test]
+    fn apply_setup_reports_failures_from_each_github_stage() {
+        let mut environment = Environment::new();
+        let project = Project::new();
+        project.single_package("fixture", "1.2.3");
+        project.cargo_proxy(&mut environment, None);
+        let gets_file = project.root().join("ruleset-gets");
+        let script = r#"#!/bin/sh
+case "$3 $4" in
+  'GET repos/socketry/example/environments?per_page=100')
+    if [ "$BAKE_TEST_SETUP_FAILURE" = environments ]; then echo 'injected failure' >&2; exit 1; fi
+    printf '%s' '{"environments":[]}' ;;
+  'GET repos/socketry/example/rulesets?per_page=100')
+    count=$(cat "$BAKE_TEST_RULESET_GETS" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    printf '%s' "$count" > "$BAKE_TEST_RULESET_GETS"
+    if [ "$count" = "$BAKE_TEST_SETUP_FAILURE" ]; then echo 'injected failure' >&2; exit 1; fi
+    printf '%s' '[]' ;;
+  'POST repos/socketry/example/rulesets') cat >/dev/null; printf '%s' '{}' ;;
+  'PUT repos/socketry/example/environments/crates-io')
+    cat >/dev/null
+    if [ "$BAKE_TEST_SETUP_FAILURE" = environment-update ]; then echo 'injected failure' >&2; exit 1; fi
+    printf '%s' '{}' ;;
+  *) echo unexpected-request >&2; exit 1 ;;
+esac
+"#;
+        with_fake_gh(&project, &mut environment, script);
+        environment.set("BAKE_TEST_RULESET_GETS", gets_file.as_os_str());
+        let repository = Repository {
+            owner: "socketry".to_owned(),
+            name: "example".to_owned(),
+        };
+
+        for failure in ["environments", "1", "2", "environment-update"] {
+            let _ = std::fs::remove_file(&gets_file);
+            environment.set("BAKE_TEST_SETUP_FAILURE", failure);
+            assert!(
+                apply_setup(
+                    &project.context(),
+                    &repository,
+                    "main",
+                    1,
+                    &["check".to_owned()],
+                    &["User:123".to_owned()],
+                    None,
+                    "crates-io",
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("injected failure"),
+                "failure stage {failure}"
+            );
+        }
+
+        let failed_cargo = project.executable(
+            "cargo-failed",
+            "#!/bin/sh\necho metadata denied >&2; exit 1\n",
+        );
+        environment.set("CARGO", failed_cargo.as_os_str());
+        assert!(
+            apply_setup(
+                &project.context(),
+                &repository,
+                "main",
+                1,
+                &["check".to_owned()],
+                &["User:123".to_owned()],
+                None,
+                "crates-io",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("metadata denied")
+        );
     }
 
     #[test]
